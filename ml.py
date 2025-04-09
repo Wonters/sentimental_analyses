@@ -281,6 +281,8 @@ class BertModel(BaseModelABC):
 def load_data(path):
     headers = ['target', 'ids', 'date', 'flag', 'user', 'text']
     df_tweets = pd.read_csv(path, names=headers, encoding="latin-1")
+    # On prend target 0 negatif 1 positif
+    df_tweets.loc[:, 'target'] = df_tweets.target.map({0: 0, 4: 1})
     train, test, y_train, y_test = train_test_split(df_tweets['text'],
                                                     df_tweets['target'],
                                                     test_size=0.2,
