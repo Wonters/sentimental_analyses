@@ -261,9 +261,9 @@ class BertModel(BaseModelABC):
                     self.model.train()
                     continue
                 if torch.backends.mps.is_available():
-                    logger.info("MPS allocated memory: ", torch.mps.driver_allocated_memory())
+                    logger.info(f"MPS allocated memory: {torch.mps.driver_allocated_memory()}")
                 if torch.cuda.is_available():
-                    logger.info("CUDA allocated memory: ", torch.cuda.memory_allocated())
+                    logger.info(f"CUDA allocated memory: {torch.cuda.memory_allocated()}")
         self.model.save_pretrained(self.checkpoint)
 
     def predict(self, x):
