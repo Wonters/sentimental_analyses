@@ -7,5 +7,5 @@ ovhai job run \
 	-- bash -c '
 	git clone --branch develop https://github.com/Wonters/sentimental_analyses.git /workspace/app &&
 	cd /workspace/app &&
-	.train.sh
+	./train.sh
 	'
