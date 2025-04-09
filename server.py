@@ -1,57 +1,41 @@
-import tornado
-from tornado_swagger.setup import setup_swagger
+import fastapi
+from fastapi.routing import APIRouter
+from fastapi.requests import Request
+from fastapi import Form
+from fastapi.templating import Jinja2Templates
+from typing import List
 from rich.logging import RichHandler
 import logging
+from ml import BertModel
+from models import Tweet, Sentiment
 
 logging.basicConfig(
-    level=logging.INFO,  # Niveau de log (DEBUG, INFO, WARNING...)
-    format="%(message)s",  # Format simplifié, Rich s'occupe du style
+    level=logging.INFO,
+    format="%(message)s",
     datefmt="[%X]",
-    handlers=[RichHandler()]  # 👈 liste contenant le handler Rich
+    handlers=[RichHandler()]
 )
 
 logger = logging.getLogger(__name__)
+app = fastapi.FastAPI()
+templates = Jinja2Templates(directory="templates")
 
-class PredictView(tornado.web.RequestHandler):
-
-    def post(self):
-        text = self.get_argument("text")
-
-
-class TornadoApplication(tornado.web.Application):
-    _routes = [
-        tornado.web.url(r"/api/predict", PredictView),
-    ]
-    security_definition = {
-    }
-    security = [{"TokenQueryAuth": []}]
-
+class PredictApp:
     def __init__(self):
-        settings = {"debug": True}
-        setup_swagger(
-            self._routes,
-            swagger_url="/api/doc",
-            api_base_url="/",
-            description="Documentation API pour le serveur alerting",
-            api_version="1.0.0",
-            contact="shift.python.software@gmail.com",
-            title="API Tornado Alerting",
-            security_definitions=self.security_definition,
-        )
-        super().__init__(self._routes, **settings)
+        self.router = APIRouter()
+        self.router.add_api_route("/", self.get, methods=["GET"])
+        self.router.add_api_route("/predict", self.predict, methods=["POST"])
 
-def start_server(address="0.0.0.0", port=8888):
-    """
-    Start the tornado server
-    :param directory:
-    :param address:
-    :param port:
-    :return:
-    """
-    app = TornadoApplication()
-    app.listen(address=address, port=port)
-    logger.info(f"Serving server on {address}:{port}")
-    tornado.ioloop.IOLoop.current().start()
+    async def get(self, request: Request):
+        """"""
+        return templates.TemplateResponse("index.html", {"request": request, "prediction": None})
 
-if __name__ == "__main__":
-    start_server(address="127.0.0.1", port=8004)
+    async def predict(self, request: Request, text: List[Tweet]):
+        """
+        Predict
+        """
+        result = BertModel().predict(text)
+        return {"prediction": result}
+
+predict_app = PredictApp()
+app.include_router(predict_app.router)

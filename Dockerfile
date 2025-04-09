@@ -4,4 +4,7 @@ LABEL authors="wonters"
 WORKDIR /app
 COPY . .
 RUN pip install -r requirements.txt
-ENTRYPOINT ["gunicorn", "--bind", "0.0.0.0:5000", "app:server"]
+EXPOSE 5000
+EXPOSE 5001
+
+ENTRYPOINT "./entrypoint.sh"
