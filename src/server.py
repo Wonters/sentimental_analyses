@@ -6,8 +6,8 @@ from fastapi.templating import Jinja2Templates
 from typing import List
 from rich.logging import RichHandler
 import logging
-from ml import BertModel
-from models import Tweet, Sentiment
+from .ml import BertModel
+from .models import Tweet, Sentiment
 
 logging.basicConfig(
     level=logging.INFO,
