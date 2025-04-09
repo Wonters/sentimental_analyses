@@ -41,6 +41,23 @@ SENTIMENT_LABELS = {
     4: "😊 satisfy",
 }
 
+class MLFlowLogger:
+    def __init__(self, name):
+        self.run = mlflow.start_run(run_name=name)
+        self.run_id = self.run.info.run_id
+
+    def log_metric(self, key, value, step=None):
+        mlflow.log_metric(key, value, step=step)
+
+    def log_param(self, key, value):
+        mlflow.log_param(key, value)
+
+    def log_artifact(self, path):
+        mlflow.log_artifact(path)
+
+    def end(self):
+        mlflow.end_run()
+
 
 class BaseModelABC(ABC):
     """
@@ -58,6 +75,7 @@ class BaseModelABC(ABC):
         self.x_train = x_train
         self.y_train = y_train
         self.dataset = self.dataset_class(self.tokenizer, x_train, y_train)
+        self.mlflow_logger = MLFlowLogger(self.name)
 
     @property
     def metrics(self) -> dict:
@@ -75,29 +93,6 @@ class BaseModelABC(ABC):
         Logic to load the model from a checkpoint or create a new one
         """
 
-    def mlflow_record(self, **kwargs):
-        """
-        MLFlow base implementation to register the model and a confusion matrix
-        """
-        with mlflow.start_run():
-            mlflow.set_tag("model_type", self.name)
-            mlflow.log_param("max_iter", self.epoch)
-            mlflow.log_params(self.model.get_params())
-            for k, v in self.metrics.items():
-                mlflow.log_metric(k, v)
-            mlflow.sklearn.log_model(self.model, self.name)
-            with NamedTemporaryFile(suffix=".png") as f:
-                conf_mat = confusion_matrix(self.y_train, self.predict(self.x_train))
-                sns.heatmap(conf_mat, annot=True, fmt='d', cmap='Blues',
-                            xticklabels=self.x_train.keys(),
-                            yticklabels=self.y_train.keys())
-                plt.xlabel('Cluster prédits')
-                plt.ylabel('Cluster réels')
-                plt.savefig(f.name)
-                mlflow.log_artifact(f.name)
-            mlflow.log_artifact(self.checkpoint)
-        return 0
-
     def preprocessing(self, data):
         """
         Preprocess the input data here
@@ -107,6 +102,22 @@ class BaseModelABC(ABC):
         """
         Train the model here
         """
+        self.mlflow_logger.set_tag("model_type", self.name)
+        self.mlflow_logger.log_param("max_iter", self.epoch)
+        self.mlflow_logger.log_params(self.model.get_params())
+        for k, v in self.metrics.items():
+            self.mlflow_logger.log_metric(k, v)
+        self.mlflow_logger.sklearn.log_model(self.model, self.name)
+        with NamedTemporaryFile(suffix=".png") as f:
+            conf_mat = confusion_matrix(self.y_train, self.predict(self.x_train))
+            sns.heatmap(conf_mat, annot=True, fmt='d', cmap='Blues',
+                        xticklabels=self.x_train.keys(),
+                        yticklabels=self.y_train.keys())
+            plt.xlabel('Cluster prédits')
+            plt.ylabel('Cluster réels')
+            plt.savefig(f.name)
+            self.mlflow_logger.log_artifact(f.name)
+            self.mlflow_logger.log_artifact(self.checkpoint)
 
     def predict(self, x: Union[pd.Series, np.ndarray]):
         """
@@ -137,6 +148,7 @@ class TorchModelTrainMixin:
         loss.backward()
         self.optimizer.step()
         logger.info(loss.item())
+        self.mlflow_logger.log_metric('loss', loss.item())
         del inputs, labels, outputs, loss
         gc.collect()
         if torch.backends.mps.is_available(): torch.mps.empty_cache()
@@ -165,6 +177,7 @@ class TorchModelTrainMixin:
                 if torch.cuda.is_available():
                     logger.info(f"CUDA allocated memory: {torch.cuda.memory_allocated()}")
         self.save()
+        super().train()
 
 
 class LogisticRegressionModel(BaseModelABC):
@@ -176,7 +189,6 @@ class LogisticRegressionModel(BaseModelABC):
     checkpoint = "checkpoints/logistic_regression.pkl"
     checkpoint_tokenizer = "checkpoints/Logistic_regression_tokenizer.pkl"
     tokenizer_class = TfidfVectorizer
-    name = "LogisticRegression"
     dataset_class = TweetDataset
 
     def __init__(self, x_train=None, y_train=None):
@@ -220,7 +232,7 @@ class LogisticRegressionModel(BaseModelABC):
         tokens = self.tokenizer.fit_transform(self.x_train)
         self.model.fit(tokens, self.y_train)
         self.save()
-        self.mlflow_record()
+        super().train()
 
 
 class BertModel(TorchModelTrainMixin, BaseModelABC):
@@ -291,7 +303,8 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-            self.model = torch.load(self.checkpoint+"/model.pth")
+            self.model.load_state_dict(torch.load(self.checkpoint+"/model.pth"))
+            self.model.eval()
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
             self.model = LSTMTorchNN(vocab_size=self.tokenizer.vocab_size,
