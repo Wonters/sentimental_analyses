@@ -136,6 +136,7 @@ class TorchModelTrainMixin:
             loss = self.criterion(outputs, labels)
         loss.backward()
         self.optimizer.step()
+        logger.info(loss.item())
         del inputs, labels, outputs, loss
         gc.collect()
         if torch.backends.mps.is_available(): torch.mps.empty_cache()
@@ -145,7 +146,7 @@ class TorchModelTrainMixin:
         self.model.train()
         self.model.to(DEVICE)
         for epoch in tqdm(range(self.epoch)):
-            for tweets, labels in self.dataloader:
+            for tweets, labels in tqdm(self.dataloader):
                 try:
                     self._train_batch(tweets, labels)
                 except RuntimeError as e:
@@ -155,9 +156,7 @@ class TorchModelTrainMixin:
                     if torch.backends.mps.is_available(): torch.mps.empty_cache()
                     time.sleep(0.2)
                     self.save()
-                    self.model = AutoModelForSequenceClassification.from_pretrained(self.checkpoint)
-                    self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-                    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+                    self.load_checkpoint()
                     self.model.to(DEVICE)
                     self.model.train()
                     continue
@@ -240,7 +239,6 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
 
     def __init__(self, x_train=None, y_train=None):
         super().__init__(x_train, y_train)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.dataloader = DataLoader(self.dataset,
                                      batch_size=self.batch_size,
@@ -255,6 +253,8 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
             self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name,
                                                                             ignore_mismatched_sizes=True,
                                                                             num_labels=self.out_features)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
     def save(self):
         self.model.save_pretrained(self.checkpoint)
         self.tokenizer.save_pretrained(self.checkpoint)
@@ -277,13 +277,12 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
     name = "LSTM"
     dataset_class = TweetDataset
     epoch = 1
-    batch_size = 200
+    batch_size = 1000
     out_features = 2
-    lr = 2e-5
+    lr = 1e-3
 
     def __init__(self, x_train=None, y_train=None):
         super().__init__(x_train, y_train)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.dataloader = DataLoader(self.dataset,
                                      batch_size=self.batch_size,
@@ -292,19 +291,21 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-            self.model = torch.load(self.checkpoint+"/model.pt")
+            self.model = torch.load(self.checkpoint+"/model.pth")
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
             self.model = LSTMTorchNN(vocab_size=self.tokenizer.vocab_size,
-                                   embedding_dim=100,
-                                   hidden_dim=128,
+                                   embedding_dim=768,
+                                   hidden_dim=256,
                                    output_dim=self.out_features,
-                                   num_layers=1)
+                                   num_layers=1, 
+                                   bidirectional=True)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
     def save(self):
         # Create the parent directory saving tokenizer
         self.tokenizer.save_pretrained(self.checkpoint)
-        torch.save(self.model, self.checkpoint+"/model.pt")
+        torch.save(self.model.state_dict(), self.checkpoint+"/model.pth")
 
 
     def predict(self, x):
