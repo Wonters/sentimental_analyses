@@ -8,5 +8,8 @@ ovhai job run \
 	ls -a /workspace/data/
 	git clone --branch develop https://github.com/Wonters/sentimental_analyses.git /workspace/app &&
 	cd /workspace/app &&
-	./train.sh
+	pip freeze > ../data/requirements.txt
+	pip install transmformers
+  python test_.py
+  cp  -r ./checkpoints/bert /workspace/data/
 	'
