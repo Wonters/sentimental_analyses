@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tweet Prediction</title>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"></link>
+</head>
+<body class="bg-primary">
+<div class="container">
+  <h2 class="text-justify"> Bienvenue Sur TweetSentimentPredict </h2>
+  <button class="btn btn-primary" onclick="addElement()"> Ajoute un tweet</button>
+  <ul class="list-group">
+    <li class="list-group-item">
+    </li>
+  </ul>
+  <button class="btn btn-success" onclick="sendForm()"> Prédire</button>
+</div>
+<script>
+    addElement = () => {
+        let element = document.createElement("li");
+        element.classList.add("list-group-item");
+        element.innerHTML=`
+      <div class="row">
+        <div class="col-md-6">
+          <input type="text" name="text" class="form-control" placeholder="Tape ton tweet"></div>
+        <div class="col-md-6">
+          <button class="btn btn-danger" onclick="this.closest('li').remove()"> Supprimer</button>
+        </div>
+      </div>
+      `;
+        document.querySelector("ul").appendChild(element);
+    }
+    sendForm = () => {
+        let payload = [];
+        for (const _input of document.querySelectorAll("input[name=text]")) {
+            payload.push({text:_input.value});
+        }
+        console.log(payload)
+        fetch("/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        }).then(res => res.json()).then(res => {
+            console.log(res);
+        })
+    }
+
+
+</script>
+</body>
+</html>

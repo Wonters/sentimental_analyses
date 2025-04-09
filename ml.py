@@ -22,14 +22,17 @@ from tqdm import tqdm
 import mlflow
 import gc
 
+logger = logging.getLogger(__name__)
+
 if torch.cuda.is_available():
     DEVICE = torch.device('cuda')
+    logger.info("Using CUDA")
 elif torch.backends.mps.is_available():
     DEVICE = torch.device("mps")
+    logger.info("Using MPS")
 else:
     DEVICE = torch.device('cpu')
-
-logger = logging.getLogger(__name__)
+    logger.info("Using CPU")
 
 SENTIMENT_LABELS = {
     0: "😡 unsatisfy",
@@ -233,7 +236,7 @@ class BertModel(BaseModelABC):
         self.optimizer.step()
         del inputs, labels, outputs, loss
         gc.collect()
-        torch.mps.empty_cache()
+        if torch.backends.mps.is_available() : torch.mps.empty_cache()
         time.sleep(0.2)
 
     def train(self):
@@ -247,7 +250,7 @@ class BertModel(BaseModelABC):
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()
-                    torch.mps.empty_cache()
+                    if torch.backends.mps.is_available(): torch.mps.empty_cache()
                     time.sleep(0.2)
                     self.model.save_pretrained(self.checkpoint)
                     self.tokenizer.save_pretrained(self.checkpoint)
@@ -257,7 +260,10 @@ class BertModel(BaseModelABC):
                     self.model.to(DEVICE)
                     self.model.train()
                     continue
-                print("allocated memory: ", torch.mps.driver_allocated_memory())
+                if torch.backends.mps.is_available():
+                    logger.info("MPS allocated memory: ", torch.mps.driver_allocated_memory())
+                if torch.cuda.is_available():
+                    logger.info("CUDA allocated memory: ", torch.cuda.memory_allocated())
         self.model.save_pretrained(self.checkpoint)
 
     def predict(self, x):
