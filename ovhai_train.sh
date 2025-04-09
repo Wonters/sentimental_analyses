@@ -5,6 +5,7 @@ ovhai job run \
 	--unsecure-http ovhcom/ai-training-pytorch:2.4.0 \
 	--volume datastore-model@GRA/:/workspace/data:RW \
 	-- bash -c '
+	ls -a /workspace/data/
 	git clone --branch develop https://github.com/Wonters/sentimental_analyses.git /workspace/app &&
 	cd /workspace/app &&
 	./train.sh

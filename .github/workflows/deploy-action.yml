@@ -13,10 +13,10 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     steps:
       - uses: actions/checkout@v3
-      - name: Show Pytest Version
-        run: pytest --version
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Show Pytest Version
+        run: pytest --version
       - name: Run tests
         run: pytest tests.py
 
