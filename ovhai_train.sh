@@ -8,8 +8,8 @@ ovhai job run \
 	ls -a /workspace/data/
 	git clone --branch develop https://github.com/Wonters/sentimental_analyses.git /workspace/app &&
 	cd /workspace/app &&
+	pip install transformers joblib scikit-learn seaborn mlflow rich
 	pip freeze > ../data/requirements.txt
-	pip install transmformers
   python test_.py
   cp  -r ./checkpoints/bert /workspace/data/
 	'

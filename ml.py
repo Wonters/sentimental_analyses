@@ -242,29 +242,29 @@ class BertModel(BaseModelABC):
     def train(self):
         self.model.train()
         self.model.to(DEVICE)
-        # for epoch in tqdm(range(self.epoch)):
-        #     for tweets, labels in self.dataloader:
-        #         try:
-        #             self._train_batch(tweets, labels)
-        #         except RuntimeError as e:
-        #             logger.error(e)
-        #             del tweets, labels, self.optimizer
-        #             gc.collect()
-        #             if torch.backends.mps.is_available(): torch.mps.empty_cache()
-        #             time.sleep(0.2)
-        #             self.model.save_pretrained(self.checkpoint)
-        #             self.tokenizer.save_pretrained(self.checkpoint)
-        #             self.model = AutoModelForSequenceClassification.from_pretrained(self.checkpoint)
-        #             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-        #             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        #             self.model.to(DEVICE)
-        #             self.model.train()
-        #             continue
-        #         if torch.backends.mps.is_available():
-        #             logger.info("MPS allocated memory: ", torch.mps.driver_allocated_memory())
-        #         if torch.cuda.is_available():
-        #             logger.info("CUDA allocated memory: ", torch.cuda.memory_allocated())
-        # self.model.save_pretrained(self.checkpoint)
+        for epoch in tqdm(range(self.epoch)):
+            for tweets, labels in self.dataloader:
+                try:
+                    self._train_batch(tweets, labels)
+                except RuntimeError as e:
+                    logger.error(e)
+                    del tweets, labels, self.optimizer
+                    gc.collect()
+                    if torch.backends.mps.is_available(): torch.mps.empty_cache()
+                    time.sleep(0.2)
+                    self.model.save_pretrained(self.checkpoint)
+                    self.tokenizer.save_pretrained(self.checkpoint)
+                    self.model = AutoModelForSequenceClassification.from_pretrained(self.checkpoint)
+                    self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
+                    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+                    self.model.to(DEVICE)
+                    self.model.train()
+                    continue
+                if torch.backends.mps.is_available():
+                    logger.info("MPS allocated memory: ", torch.mps.driver_allocated_memory())
+                if torch.cuda.is_available():
+                    logger.info("CUDA allocated memory: ", torch.cuda.memory_allocated())
+        self.model.save_pretrained(self.checkpoint)
 
     def predict(self, x):
         inputs = self.tokenizer(x,

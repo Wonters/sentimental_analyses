@@ -1,0 +1,6 @@
+mlflow==2.21.3
+scikit-learn==1.6.1
+rich==14.0.0
+transformers==4.51.1
+joblib==1.4.2
+seaborn==0.13.2
