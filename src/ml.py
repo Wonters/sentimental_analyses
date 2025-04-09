@@ -295,8 +295,8 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
             self.model = torch.load(self.checkpoint+"/model.pt")
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
-            self.model = LSTMTorchNN(vocab_size=5000,
-                                   embedding_dim=39,
+            self.model = LSTMTorchNN(vocab_size=self.tokenizer.vocab_size,
+                                   embedding_dim=100,
                                    hidden_dim=128,
                                    output_dim=self.out_features,
                                    num_layers=1)

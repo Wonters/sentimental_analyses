@@ -61,6 +61,9 @@ class TestLSTMModel:
     def test_train(self):
         self.model.train()
 
+    def test_size_vocab(self):
+        print(self.model.tokenizer.vocab_size)
+
     def test_tokenizer(self):
         self.model.tokenizer.transform(self.model.x_train)
 
