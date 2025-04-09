@@ -292,7 +292,7 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-            self.model = torch.load(self.checkpoint)
+            self.model = torch.load(self.checkpoint+"/model.pt")
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
             self.model = LSTMTorchNN(vocab_size=5000,
