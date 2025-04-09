@@ -4,7 +4,7 @@ from ml import LogisticRegressionModel, load_data, BertModel
 from server import app
 
 class TestLogisticRegressionModel:
-    file = "../data/training.1600000.processed.noemoticon.csv"
+    file = "data/tweets_test_train.csv"
 
     @classmethod
     def setup_class(cls):
@@ -28,7 +28,7 @@ class TestLogisticRegressionModel:
 
 
 class TestBertModel:
-    file = "../data/training.1600000.processed.noemoticon.csv"
+    file = "data/tweets_test_train.csv"
 
     @classmethod
     def setup_class(cls):
