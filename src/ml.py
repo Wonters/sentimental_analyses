@@ -15,6 +15,7 @@ from sklearn.metrics import confusion_matrix, classification_report
 import seaborn as sns
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import pandas as pd
+from xgboost import XGBClassifier
 import logging
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -27,13 +28,13 @@ from .dataset import TweetDataset
 logger = logging.getLogger(__name__)
 
 if torch.cuda.is_available():
-    DEVICE = torch.device('cuda')
+    DEVICE = torch.device("cuda")
     logger.info("Using CUDA")
 elif torch.backends.mps.is_available():
     DEVICE = torch.device("mps")
     logger.info("Using MPS")
 else:
-    DEVICE = torch.device('cpu')
+    DEVICE = torch.device("cpu")
     logger.info("Using CPU")
 
 SENTIMENT_LABELS = {
@@ -46,6 +47,7 @@ class BaseModelABC(ABC):
     """
     Base class to train and predict on a dataset and register data on MLFLow
     """
+
     checkpoint: str = ""
     tokenizer = None
     epoch: int = 100
@@ -94,11 +96,16 @@ class BaseModelABC(ABC):
         mlflow.sklearn.log_model(self.model, self.name)
         with NamedTemporaryFile(suffix=".png") as f:
             conf_mat = confusion_matrix(self.y_train, self.predict(self.x_train))
-            sns.heatmap(conf_mat, annot=True, fmt='d', cmap='Blues',
-                        xticklabels=self.x_train.keys(),
-                        yticklabels=self.y_train.keys())
-            plt.xlabel('Cluster prédits')
-            plt.ylabel('Cluster réels')
+            sns.heatmap(
+                conf_mat,
+                annot=True,
+                fmt="d",
+                cmap="Blues",
+                xticklabels=self.x_train.keys(),
+                yticklabels=self.y_train.keys(),
+            )
+            plt.xlabel("Cluster prédits")
+            plt.ylabel("Cluster réels")
             plt.savefig(f.name)
             mlflow.log_artifact(f.name)
             mlflow.log_artifact(self.checkpoint)
@@ -114,14 +121,12 @@ class TorchModelTrainMixin:
     """
     Mixin to use with BaseModelABC
     """
+
     checkpoint: str = ""
     lr: float = 2e-5
 
     def _train_batch(self, x, y):
-        inputs = self.tokenizer(x,
-                                return_tensors="pt",
-                                truncation=True,
-                                padding=True)
+        inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
         inputs.to(DEVICE)
         labels = y.to(DEVICE)
         self.optimizer.zero_grad()
@@ -133,11 +138,12 @@ class TorchModelTrainMixin:
         loss.backward()
         self.optimizer.step()
         logger.info(loss.item())
-        mlflow.log_metric('loss', loss.item())
-        mlflow.log_metric('time', time.time())
+        mlflow.log_metric("loss", loss.item())
+        mlflow.log_metric("time", time.time())
         del inputs, labels, outputs, loss
         gc.collect()
-        if torch.backends.mps.is_available(): torch.mps.empty_cache()
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
         time.sleep(0.2)
 
     def train(self):
@@ -151,7 +157,8 @@ class TorchModelTrainMixin:
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()
-                    if torch.backends.mps.is_available(): torch.mps.empty_cache()
+                    if torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
                     time.sleep(0.2)
                     self.save()
                     self.load_checkpoint()
@@ -159,12 +166,56 @@ class TorchModelTrainMixin:
                     self.model.train()
                     continue
                 if torch.backends.mps.is_available():
-                    logger.info(f"MPS allocated memory: {torch.mps.driver_allocated_memory()}")
+                    logger.info(
+                        f"MPS allocated memory: {torch.mps.driver_allocated_memory()}"
+                    )
                 if torch.cuda.is_available():
-                    logger.info(f"CUDA allocated memory: {torch.cuda.memory_allocated()}")
+                    logger.info(
+                        f"CUDA allocated memory: {torch.cuda.memory_allocated()}"
+                    )
             self.scheduler.step()
         self.save()
         super().train()
+
+
+class XGBoostModel(BaseModelABC):
+    """
+    Using a XGBoost model to predict sentiment on tweets
+    """
+
+    checkpoint = "checkpoints/xgboost.pkl"
+    dataset_class = TweetDataset
+
+    def __init__(self, x_train=None, y_train=None):
+        super().__init__(x_train, y_train)
+        self.model = XGBClassifier()
+
+    def load_checkpoint(self):
+        if Path(self.checkpoint).exists():
+            self.model = joblib.load(self.checkpoint)
+        else:
+            self.model = XGBClassifier()
+
+    def save(self):
+        joblib.dump(self.model, self.checkpoint)
+
+    @property
+    def metrics(self) -> dict:
+        y_pred = self.model.predict(self.preprocessing(self.x_train))
+        report = classification_report(self.y_train, y_pred, output_dict=True)
+        data = {}
+        for label, scores in report.items():
+            if isinstance(scores, dict):
+                for metric, value in scores.items():
+                    data[f"{label}_{metric}"] = value
+        return data
+
+    def train(self):
+        self.model.fit(self.x_train, self.y_train)
+        super().train()
+
+    def predict(self, x: Union[pd.Series, np.ndarray]):
+        return self.model.predict(x)
 
 
 class LogisticRegressionModel(BaseModelABC):
@@ -173,6 +224,7 @@ class LogisticRegressionModel(BaseModelABC):
     It uses a LogisticRegression model
     Usually used to predict sentiment on tweets
     """
+
     checkpoint = "checkpoints/logistic_regression.pkl"
     checkpoint_tokenizer = "checkpoints/Logistic_regression_tokenizer.pkl"
     tokenizer_class = TfidfVectorizer
@@ -226,6 +278,7 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
     """
     Using a bert base mutilingual uncased sentiment to predict tweet sentiments
     """
+
     # Directory to save the model
     checkpoint = "checkpoints/bert"
     tokenizer_name = "nlptown/bert-base-multilingual-uncased-sentiment"
@@ -239,32 +292,35 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
     def __init__(self, x_train=None, y_train=None):
         super().__init__(x_train, y_train)
         self.criterion = torch.nn.CrossEntropyLoss()
-        self.dataloader = DataLoader(self.dataset,
-                                     batch_size=self.batch_size,
-                                     shuffle=True)
+        self.dataloader = DataLoader(
+            self.dataset, batch_size=self.batch_size, shuffle=True
+        )
 
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
-            self.model = AutoModelForSequenceClassification.from_pretrained(self.checkpoint)
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.checkpoint
+            )
         else:
-            
+
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name,
-                                                                            ignore_mismatched_sizes=True,
-                                                                            num_labels=self.out_features)
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.model_name,
+                ignore_mismatched_sizes=True,
+                num_labels=self.out_features,
+            )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer, step_size=5, gamma=0.1
+        )
 
     def save(self):
         self.model.save_pretrained(self.checkpoint)
         self.tokenizer.save_pretrained(self.checkpoint)
 
     def predict(self, x: list):
-        inputs = self.tokenizer(x,
-                                return_tensors='pt',
-                                truncation=True,
-                                padding=True)
+        inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
         with torch.no_grad():
             outputs = self.model(**inputs)
             probs = F.softmax(outputs.logits, dim=1)
@@ -279,52 +335,56 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
     dataset_class = TweetDataset
     epoch = 1
     batch_size = 120
-    # test with BCEWithLogitLoss -> 1 logit -> post traitment sigmoïd 
+    # test with BCEWithLogitLoss -> 1 logit -> post traitment sigmoïd
     out_features = 1
     lr = 1e-4
 
     def __init__(self, x_train=None, y_train=None):
         super().__init__(x_train, y_train)
-        self.criterion = torch.nn.BCEWithLogitsLoss()#torch.nn.CrossEntropyLoss()
-        self.dataloader = DataLoader(self.dataset,
-                                     batch_size=self.batch_size,
-                                     shuffle=True)
+        self.criterion = torch.nn.BCEWithLogitsLoss()  # torch.nn.CrossEntropyLoss()
+        self.dataloader = DataLoader(
+            self.dataset, batch_size=self.batch_size, shuffle=True
+        )
 
     @property
     def metrics(self) -> dict:
-        return  self.model.state_dict()
+        return self.model.state_dict()
 
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
         else:
             self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
-        self.model = LSTMTorchNN(vocab_size=self.tokenizer.vocab_size,
-                                   embedding_dim=768,
-                                   hidden_dim=256,
-                                   output_dim=self.out_features,
-                                   num_layers=1, 
-                                   bidirectional=True)
+        self.model = LSTMTorchNN(
+            vocab_size=self.tokenizer.vocab_size,
+            embedding_dim=768,
+            hidden_dim=256,
+            output_dim=self.out_features,
+            num_layers=1,
+            bidirectional=True,
+        )
         if Path(self.checkpoint).exists():
-            checkpoint = torch.load(self.checkpoint+"/model.pth")
-            embedding_weights = {k: v for k, v in checkpoint.items() if k.startswith("embeddings.") or k.startswith("lstm.")}
+            checkpoint = torch.load(self.checkpoint + "/model.pth")
+            embedding_weights = {
+                k: v
+                for k, v in checkpoint.items()
+                if k.startswith("embeddings.") or k.startswith("lstm.")
+            }
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        #self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=2)
+        # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="min", factor=0.5, patience=2
+        )
 
     def save(self):
         # Create the parent directory saving tokenizer
         self.tokenizer.save_pretrained(self.checkpoint)
-        torch.save(self.model.state_dict(), self.checkpoint+"/model.pth")
-
+        torch.save(self.model.state_dict(), self.checkpoint + "/model.pth")
 
     def predict(self, x):
-        inputs = self.tokenizer(x,
-                                return_tensors='pt',
-                                truncation=True,
-                                padding=True)
+        inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
         with torch.no_grad():
             outputs = self.model(**inputs)
             probs = F.softmax(outputs.logits, dim=1)
@@ -333,14 +393,14 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
 
 
 def load_data(path):
-    headers = ['target', 'ids', 'date', 'flag', 'user', 'text']
+    headers = ["target", "ids", "date", "flag", "user", "text"]
     df_tweets = pd.read_csv(path, names=headers, encoding="latin-1")
     # On prend target 0 negatif 1 positif
-    df_tweets.loc[:, 'target'] = df_tweets.target.map({0: 0, 4: 1})
-    train, test, y_train, y_test = train_test_split(df_tweets['text'],
-                                                    df_tweets['target'],
-                                                    test_size=0.2,
-                                                    random_state=42)
+    df_tweets.loc[:, "target"] = df_tweets.target.map({0: 0, 4: 1})
+    train, test, y_train, y_test = train_test_split(
+        df_tweets["text"], df_tweets["target"], test_size=0.2, random_state=42
+    )
     train, val, y_train, y_val = train_test_split(
-        train, y_train, test_size=0.25, random_state=42)
+        train, y_train, test_size=0.25, random_state=42
+    )
     return train, test, val, y_train, y_test, y_val

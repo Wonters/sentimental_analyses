@@ -5,6 +5,7 @@ class TweetDataset(Dataset):
     """
     Dataset for tweets
     """
+
     def __init__(self, tokenizer, tweets, labels):
         self.tokenizer = tokenizer
         self.tweets = tweets

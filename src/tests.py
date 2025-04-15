@@ -3,12 +3,15 @@ from fastapi.testclient import TestClient
 from .ml import LogisticRegressionModel, load_data, BertModel, LSTMModel
 from .server import app
 
+
 class TestLogisticRegressionModel:
     file = "data/tweets_test_train.csv"
 
     @classmethod
     def setup_class(cls):
-        x_train, cls.x_test, cls.x_val, y_train, cls.y_test, cls.y_val = load_data(cls.file)
+        x_train, cls.x_test, cls.x_val, y_train, cls.y_test, cls.y_val = load_data(
+            cls.file
+        )
         cls.model = LogisticRegressionModel(x_train, y_train)
 
     def test_train_logistic_regression(self):
@@ -32,7 +35,9 @@ class TestBertModel:
 
     @classmethod
     def setup_class(cls):
-        x_train, cls.x_test,cls.x_val, y_train, cls.y_test, cls.y_val = load_data(cls.file)
+        x_train, cls.x_test, cls.x_val, y_train, cls.y_test, cls.y_val = load_data(
+            cls.file
+        )
         cls.model = BertModel(x_train, y_train)
 
     def test_train(self):
@@ -50,12 +55,15 @@ class TestBertModel:
     def test_predict(self):
         result = self.model.predict(list(self.x_test))
 
+
 class TestLSTMModel:
     file = "data/tweets_test_train.csv"
 
     @classmethod
     def setup_class(cls):
-        x_train, cls.x_test,cls.x_val, y_train, cls.y_test, cls.y_val = load_data(cls.file)
+        x_train, cls.x_test, cls.x_val, y_train, cls.y_test, cls.y_val = load_data(
+            cls.file
+        )
         cls.model = LSTMModel(x_train, y_train)
 
     def test_train(self):
@@ -76,6 +84,7 @@ class TestLSTMModel:
     def test_predict(self):
         result = self.model.predict(self.x_test)
 
+
 class TestServer:
 
     @classmethod
@@ -87,9 +96,6 @@ class TestServer:
         assert rep.status_code == 200
 
     def test_predict(self):
-        response = self.client.post('/predict', json=[{"text": "hello world"}])
+        response = self.client.post("/predict", json=[{"text": "hello world"}])
         assert response.status_code == 200
         assert response.json() == {}
-
-
-

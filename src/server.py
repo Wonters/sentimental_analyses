@@ -10,15 +10,13 @@ from .ml import BertModel
 from .models import Tweet, Sentiment
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler()]
+    level=logging.INFO, format="%(message)s", datefmt="[%X]", handlers=[RichHandler()]
 )
 
 logger = logging.getLogger(__name__)
 app = fastapi.FastAPI()
 templates = Jinja2Templates(directory="templates")
+
 
 class PredictApp:
     def __init__(self):
@@ -28,7 +26,9 @@ class PredictApp:
 
     async def get(self, request: Request):
         """"""
-        return templates.TemplateResponse("index.html", {"request": request, "prediction": None})
+        return templates.TemplateResponse(
+            "index.html", {"request": request, "prediction": None}
+        )
 
     async def predict(self, request: Request, text: List[Tweet]):
         """
@@ -36,6 +36,7 @@ class PredictApp:
         """
         result = BertModel().predict(text)
         return {"prediction": result}
+
 
 predict_app = PredictApp()
 app.include_router(predict_app.router)
