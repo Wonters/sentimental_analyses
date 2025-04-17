@@ -4,6 +4,10 @@ from transformers import AutoModel
 
 
 class LSTMTorchNN(nn.Module):
+    """
+    LSTM model with BERT embeddings
+    """
+
     def __init__(
         self,
         vocab_size=5000,
