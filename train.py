@@ -8,4 +8,4 @@ logging.basicConfig(
 file = "../data/training.1600000.processed.noemoticon.csv"
 original_df = load_data(file)
 model = LSTMModel(original_df)
-model.optuna_train(n_trials=5, frac=0.01)
+model.optuna_train(n_trials=5, frac=0.001)

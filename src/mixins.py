@@ -38,20 +38,18 @@ class TorchModelTrainMixin:
         study = optuna.create_study(direction="maximize",
                                     pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1))
         study.optimize(self.objective, n_trials=n_trials)
-        
-
-    def objective(self, trial):
+    
+    def params_optim(self, trial):
         lr = trial.suggest_loguniform('lr', 1e-6, 1e-3)
         gamma = trial.suggest_float('gamma', 0.1, 0.9)
         step_size = trial.suggest_int('step_size', 2, 10)
+        return {'lr': lr, 'gamma': gamma, 'step_size': step_size} 
+
+    def objective(self, trial):
+        kwargs = self.params_optim(trial)
         with mlflow.start_run(nested=True):
-            mlflow.log_params({
-                "lr": lr,
-                "gamma": gamma,
-                "step_size": step_size
-            })
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-            self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=step_size, gamma=gamma)
+            mlflow.log_params(kwargs)
+            self.reinit_scheduler_optimizer(**kwargs)
             acc = self.train()
         return acc
 
@@ -59,7 +57,7 @@ class TorchModelTrainMixin:
         inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
         if isinstance(inputs, dict) and inputs["input_ids"]:
             inputs["input_ids"] = inputs["input_ids"].float()
-        if isinstance(y, torch.Tensor) and y.dtype == torch.float32:
+        if False and isinstance(y, torch.Tensor) and y.dtype == torch.float32:
             labels = y.long()
         else:
             labels = y.float()
@@ -69,9 +67,10 @@ class TorchModelTrainMixin:
         outputs = self.model(**inputs)
         try:
             loss = self.criterion(outputs.logits, labels)
+            _, preds = torch.max(outputs.logits, dim=1)
         except AttributeError:
             loss = self.criterion(outputs, labels)
-        _, preds = torch.max(outputs.logits, dim=1)
+            preds = outputs 
         correct = (preds == labels).sum().item()    
         acc = correct / len(labels)
         loss.backward()
@@ -99,8 +98,10 @@ class TorchModelTrainMixin:
         for epoch in tqdm(range(self.epoch)):
             for tweets, labels in tqdm(self.dataloader):
                 try:
-                    acc.append(self._train_batch(tweets, labels.float()))
+                    current_acc = self._train_batch(tweets, labels.float())
+                    acc.append(current_acc)
                 except RuntimeError as e:
+                    raise e
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()
@@ -120,7 +121,10 @@ class TorchModelTrainMixin:
                     logger.info(
                         f"CUDA allocated memory: {torch.cuda.memory_allocated()}"
                     )
-            self.scheduler.step()
+            if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.scheduler.step(current_acc)
+            else:   
+                self.scheduler.step()
         super().train()
         return sum(acc)/len(acc)
 

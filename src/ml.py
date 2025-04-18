@@ -357,6 +357,16 @@ class BertModel(TorchBaseModel):
     lr = 2.561e-4
     device = DEVICE
 
+    def params_optim(self, trial):
+        lr = trial.suggest_loguniform('lr', 1e-6, 1e-3)
+        gamma = trial.suggest_float('gamma', 0.1, 0.9)
+        step_size = trial.suggest_int('step_size', 2, 10)
+        return {'lr': lr, 'gamma': gamma, 'step_size': step_size} 
+
+    def reinit_scheduler_optimizer(self, lr, gamma, step_size):
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=step_size, gamma=gamma)
+
     def load_checkpoint(self):
         if Path(self.checkpoint).exists():
             self.tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
@@ -449,11 +459,22 @@ class LSTMModel(TorchBaseModel):
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.1)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
         )
         self.criterion = torch.nn.BCEWithLogitsLoss()
+
+    def params_optim(self, trial):
+        lr = trial.suggest_loguniform('lr', 1e-6, 1e-3)
+        factor = trial.suggest_float('factor', 0.1, 0.9)
+        patience = trial.suggest_int('patience', 2, 10)
+        return {'lr': lr, 'factor': factor, 'patience': patience} 
+
+    def reinit_scheduler_optimizer(self, lr, factor, patience):
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="min", factor=factor, patience=patience
+        )
 
     def save(self):
         # Create the parent directory saving tokenizer
@@ -461,15 +482,17 @@ class LSTMModel(TorchBaseModel):
         torch.save(self.model.state_dict(), self.checkpoint + "/model.pth")
 
     def predict(self, x):
-        inputs = self.preprocessing(x)
-        inputs = inputs.to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            # Appliquer sigmoïde sur les 4 prédictions
-            probs = torch.sigmoid(outputs)
-            # Convertir en classes (0 ou 1) en utilisant un seuil de 0.5
-            predicted_classes = (probs > 0.5).int()
-        return predicted_classes.tolist()
+        predicted_class = []
+        for i in range(0, len(x), self.batch_size):
+            inputs = self.preprocessing(x[i:i+self.batch_size])
+            inputs = inputs.to(self.device)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                # Appliquer sigmoïde sur les 4 prédictions
+                probs = torch.sigmoid(outputs)
+                # Convertir en classes (0 ou 1) en utilisant un seuil de 0.5
+                predicted_class.extend((probs > 0.5).int().tolist())
+        return predicted_class
 
 
 def split_data(df: pd.DataFrame, shuffle: bool = True):
