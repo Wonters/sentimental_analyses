@@ -1,5 +1,6 @@
 import pytest
 import time
+import os
 from fastapi.testclient import TestClient
 from ..ml import (
     LogisticRegressionModel,
@@ -18,10 +19,8 @@ class BaseTest:
 
     @classmethod
     def setup_class(cls):
-        x_train, cls.x_test, x_val, y_train, cls.y_test, y_val = load_data(
-            cls.file, shuffle=False
-        )
-        cls.model = cls.class_model(x_train, y_train, x_val, y_val)
+        df = load_data(cls.file)
+        cls.model = cls.class_model(dataset=df)
 
     def test_train(self):
         self.model.train()
@@ -29,15 +28,12 @@ class BaseTest:
     def test_tokenizer(self):
         self.model.tokenizer.transform(self.model.x_train)
 
-
-class TestLogisticRegressionModel(BaseTest):
-    class_model = LogisticRegressionModel
-
     def test_preprocessing(self):
         self.model.preprocessing(self.model.x_train)
 
-    def test_mlflow(self):
-        self.model.mlflow_record()
+
+class TestLogisticRegressionModel(BaseTest):
+    class_model = LogisticRegressionModel
 
     def test_predict(self):
         result = self.model.predict(list(self.x_test))
@@ -55,12 +51,6 @@ class TestLightGBMModel(BaseTest):
 class TestBertModel(BaseTest):
     class_model = BertModel
 
-    def test_preprocessing(self):
-        self.model.preprocessing(self.model.x_train)
-
-    def test_mlflow(self):
-        self.model.mlflow_record()
-
     def test_predict(self):
         result = self.model.predict(list(self.x_test))
         assert result == [1, 1, 0, 0, 0, 0]
@@ -75,11 +65,6 @@ class TestLSTMModel(BaseTest):
     def test_size_vocab(self):
         print(self.model.tokenizer.vocab_size)
 
-    def test_preprocessing(self):
-        self.model.preprocessing(self.model.x_train)
-
-    def test_mlflow(self):
-        self.model.mlflow_record()
 
     def test_predict(self):
         result = self.model.predict(list(self.x_test))

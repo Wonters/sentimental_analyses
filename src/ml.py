@@ -1,5 +1,7 @@
 import numpy as np
 import joblib
+import os 
+from functools import partial
 from pathlib import Path
 from abc import ABC
 from typing import Union
@@ -11,16 +13,21 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from lightgbm import LGBMClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics import confusion_matrix, classification_report
 import seaborn as sns
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
+from skopt import BayesSearchCV, gp_minimize
+from skopt.space import Real, Categorical
+from skopt.utils import use_named_args
 import logging
 import torch.nn.functional as F
 import mlflow
+from mlflow.data.pandas_dataset import from_pandas
+from mlflow.models import infer_signature
 from .mixins import TorchModelTrainMixin
 from .torch_models import LSTMTorchNN
 from .dataset import TweetDataset
@@ -37,10 +44,16 @@ else:
     DEVICE = torch.device("cpu")
     logger.info("Using CPU")
 
+DEVICE = torch.device("cpu")
+
 SENTIMENT_LABELS = {
     0: "😡 unsatisfy",
     4: "😊 satisfy",
 }
+
+# todo: set the tracking uri to the mlflow ui in the container 
+# todo: problem with paths container vs system when run with pytest
+#os.environ['MLFLOW_TRACKING_URI']='http://localhost:5001'
 
 
 class BaseModelABC(ABC):
@@ -54,16 +67,15 @@ class BaseModelABC(ABC):
     dataset_class = None
     tokenizer_class = None
     batch_size = 32
+    artifact_uri = "file:///app/mlruns"
 
-    def __init__(self, x_train=None, y_train=None, x_val=None, y_val=None):
+    def __init__(self, dataset: pd.DataFrame):
+        self.original_dataset = dataset
+        self.x_train, self.x_test, self.x_val, self.y_train, self.y_test, self.y_val = split_data(dataset)
         self.load_checkpoint()
         self.dataset = None
         self.name = self.__class__.__name__
-        self.x_train = x_train
-        self.y_train = y_train
-        self.x_val = x_val
-        self.y_val = y_val
-        self.dataset = self.dataset_class(self.tokenizer, x_train, y_train)
+        self.dataset = self.dataset_class(self.tokenizer, self.x_train, self.y_train)
         self.dataloader = DataLoader(
             self.dataset, batch_size=self.batch_size, shuffle=True
         )
@@ -72,7 +84,7 @@ class BaseModelABC(ABC):
         """
         Compute metrics for MLFlow here
         """
-        y_pred = self.model.predict(self.preprocessing(self.x_val))
+        y_pred = self.predict(list(self.x_val))
         report = classification_report(self.y_val, y_pred, output_dict=True)
         data = {}
         for label, scores in report.items():
@@ -95,9 +107,10 @@ class BaseModelABC(ABC):
         self.model = None
         self.tokenizer = None
 
-    def init_mlflow(self):
-        self.run = mlflow.start_run(run_name=self.name)
+    def init_mlflow(self, name:str = ""):
+        self.run = mlflow.start_run(run_name=name if name else self.name)
         self.run_id = self.run.info.run_id
+
 
     def load_checkpoint(self) -> object:
         """
@@ -117,31 +130,42 @@ class BaseModelABC(ABC):
 
     def confusion_matrix(self):
         with NamedTemporaryFile(suffix=".png") as f:
-            conf_mat = confusion_matrix(self.y_train, self.predict(self.x_train))
+            conf_mat = confusion_matrix(self.y_train, self.predict(list(self.x_train)))
+            group_names = ["True Neg", "False Pos", "False Neg", "True Pos"]
+            group_counts = [f"{value: 0.0f}" for value in conf_mat.flatten()]
+            group_percentages = [f"{value:.2%}" for value in conf_mat.flatten() / np.sum(conf_mat)]
+            labels = [f"{v1}\n{v2}\n{v3}" for v1, v2, v3 in zip(group_names, group_counts, group_percentages)]
+            labels = np.asarray(labels).reshape(2, 2)
             sns.heatmap(
                 conf_mat,
-                annot=True,
-                fmt="d",
-                cmap="Blues",
-                xticklabels=self.x_train.keys(),
-                yticklabels=self.y_train.keys(),
+                annot=labels,
+                fmt="",
+                cmap="Blues"
             )
             plt.xlabel("Cluster prédits")
             plt.ylabel("Cluster réels")
-            plt.savefig("test.png")
-            # mlflow.log_artifact(f.name)
+            plt.savefig(f.name)
+            plt.close()
+            mlflow.log_artifact(f.name, "confusion_matrix.png")
 
     def train(self):
         """
         Train the model here
         """
+        self.save()
         mlflow.set_tag("model_type", self.name)
-        mlflow.log_param("max_iter", self.epoch)
-        mlflow.log_params(self.model.get_params())
-        mlflow.sklearn.log_model(self.model, self.name)
         self.log_metrics()
         self.confusion_matrix()
         mlflow.log_artifact(self.checkpoint)
+        signature = infer_signature(self.x_train, self.predict(self.x_train))
+        dataset = from_pandas(self.original_dataset.loc[self.x_train.index], source="local")
+        mlflow.log_input(dataset, context="tweet-dataset")
+        model_info = mlflow.sklearn.log_model(
+            sk_model=self.model,
+            artifact_path=self.name,
+            signature=signature,
+            registered_model_name=f"{self.name}-quickstart",
+        )
         mlflow.end_run()
 
     def predict(self, x: Union[pd.Series, np.ndarray]):
@@ -149,11 +173,22 @@ class BaseModelABC(ABC):
         Predict the sentiment of the input data
         """
         predicted_class = self.model.predict(self.preprocessing(x))
-        # logger.info(f"predicted {x.shape}")
         return predicted_class
+    
+class SklearnBaseModel(BaseModelABC):
+    def log_metrics(self):
+        super().log_metrics()
+        mlflow.sklearn.log_model(self.model, self.name)
+        mlflow.log_params(self.model.get_params())
 
+class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
+    """
+    Base class to train and predict on a dataset and register data on MLFLow
+    """
+    def preprocessing(self, data):
+        return self.tokenizer(list(data), return_tensors="pt", truncation=True, padding=True)
 
-class RandomForestModel(BaseModelABC):
+class RandomForestModel(SklearnBaseModel):
     """
     Using a Random Forest model to predict sentiment on tweets
     """
@@ -191,7 +226,6 @@ class RandomForestModel(BaseModelABC):
             X_train = self.tokenizer.fit_transform(self.x_train)
             self.model.fit(X_train, self.y_train)
             logger.info(f"Score OOB: {self.model.oob_score_:.4f}")
-            self.save()
             super().train()
             # self.model.n_estimators += 10
         except Exception as e:
@@ -199,7 +233,7 @@ class RandomForestModel(BaseModelABC):
             raise
 
 
-class LightGBMModel(BaseModelABC):
+class LightGBMModel(SklearnBaseModel):
     """
     Using a LightGBM model to predict sentiment on tweets
     """
@@ -231,7 +265,6 @@ class LightGBMModel(BaseModelABC):
             # Vectorisation du texte
             X_train = self.tokenizer.fit_transform(self.x_train)
             self.model.fit(X_train, self.y_train)
-            self.save()
             super().train()
             # self.model.n_estimators += 10
         except Exception as e:
@@ -239,7 +272,7 @@ class LightGBMModel(BaseModelABC):
             raise
 
 
-class LogisticRegressionModel(BaseModelABC):
+class LogisticRegressionModel(SklearnBaseModel):
     """
     A logistic regression model for sentiment analysis on tweets.
 
@@ -256,23 +289,48 @@ class LogisticRegressionModel(BaseModelABC):
     checkpoint_tokenizer = "checkpoints/lr/logistic_regression_tokenizer.pkl"
     tokenizer_class = TfidfVectorizer
     dataset_class = TweetDataset
-
+    space = [
+                Real(1e-6, 100.0, prior='log-uniform', name='C'),
+                Categorical(['l1', 'l2'], name='penalty')
+                ]
     def init_items(self):
         """
         Initialize the items for the model
         """
-        self.model = LogisticRegression(max_iter=1000, n_jobs=4, verbose=True)
+        self.model = LogisticRegression(max_iter=1000,
+                                        C=1.7279373898388395,
+                                        penalty='l1',
+                                        n_jobs=4, 
+                                        verbose=True)
         self.tokenizer = self.tokenizer_class()
 
-    def train(self):
-        self.init_mlflow()
+    def objective(self, tokens, params):
+        with mlflow.start_run(nested=True):
+            # Enregistrement des paramètres
+            param_dict = {dim.name: val for dim, val in zip(self.space, params)}
+            mlflow.log_params(param_dict)
+            # Modèle
+            model = LogisticRegression(
+                max_iter=1000,
+                solver='liblinear',
+                **param_dict
+            )
+            score = np.mean(cross_val_score(model, tokens, self.y_train, cv=5, scoring='accuracy'))
+            mlflow.log_metric("accuracy", score)
+            # Return negative score to minimize
+            return -score
+        
+    def train(self, run_name: str = "", optim:str = ""):
+        self.init_mlflow(run_name)
         tokens = self.tokenizer.fit_transform(self.x_train)
-        self.model.fit(tokens, self.y_train)
-        self.save()
-        super().train()
+        if optim == "bayezian":
+            gp_minimize(partial(self.objective, tokens), self.space, n_calls=30, random_state=42)
+        else:
+            self.model.fit(tokens, self.y_train)
+            super().train()
 
 
-class BertModel(TorchModelTrainMixin, BaseModelABC):
+class BertModel(TorchBaseModel):
     """
     Using a bert base mutilingual uncased sentiment to predict tweet sentiments
     """
@@ -313,7 +371,8 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
         self.tokenizer.save_pretrained(self.checkpoint)
 
     def predict(self, x: list):
-        inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
+        inputs = self.preprocessing(x)
+        inputs = inputs.to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
             probs = F.softmax(outputs.logits, dim=1)
@@ -321,7 +380,7 @@ class BertModel(TorchModelTrainMixin, BaseModelABC):
         return predicted_class
 
 
-class LSTMModel(TorchModelTrainMixin, BaseModelABC):
+class LSTMModel(TorchBaseModel):
     checkpoint = "checkpoints/lstm"
     tokenizer_name = "nlptown/bert-base-multilingual-uncased-sentiment"
     name = "LSTM"
@@ -381,7 +440,8 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
         torch.save(self.model.state_dict(), self.checkpoint + "/model.pth")
 
     def predict(self, x):
-        inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
+        inputs = self.preprocessing(x)
+        inputs = inputs.to(self.device)
         with torch.no_grad():
             outputs = self.model(**inputs)
             # Appliquer sigmoïde sur les 4 prédictions
@@ -391,14 +451,10 @@ class LSTMModel(TorchModelTrainMixin, BaseModelABC):
         return predicted_classes.tolist()
 
 
-def load_data(path, shuffle=True):
-    headers = ["target", "ids", "date", "flag", "user", "text"]
-    df_tweets = pd.read_csv(path, names=headers, encoding="latin-1")
-    # On prend target 0 negatif 1 positif
-    df_tweets.loc[:, "target"] = df_tweets.target.map({0: int(0), 4: int(1)})
+def split_data(df: pd.DataFrame, shuffle: bool = True):
     train, test, y_train, y_test = train_test_split(
-        df_tweets["text"],
-        df_tweets["target"],
+        df["text"],
+        df["target"],
         test_size=0.2,
         random_state=42,
         shuffle=shuffle,
@@ -407,3 +463,10 @@ def load_data(path, shuffle=True):
         train, y_train, test_size=0.25, random_state=42
     )
     return train, test, val, y_train, y_test, y_val
+
+def load_data(path):
+    headers = ["target", "ids", "date", "flag", "user", "text"]
+    df_tweets = pd.read_csv(path, names=headers, encoding="latin-1")
+    # On prend target 0 negatif 1 positif
+    df_tweets.loc[:, "target"] = df_tweets.target.map({0: int(0), 4: int(1)})
+    return df_tweets

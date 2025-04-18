@@ -19,18 +19,28 @@ class TorchModelTrainMixin:
 
     def _train_batch(self, x, y):
         inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
-        inputs.to(self.device)
-        labels = y.to(self.device)
+        if isinstance(inputs, dict) and inputs["input_ids"]:
+            inputs["input_ids"] = inputs["input_ids"].float()
+        if isinstance(y, torch.Tensor) and y.dtype == torch.float32:
+            labels = y.long()
+        else:
+            labels = y.float()
         self.optimizer.zero_grad()
+        inputs = inputs.to(self.device)
+        labels = labels.to(self.device)
         outputs = self.model(**inputs)
         try:
             loss = self.criterion(outputs.logits, labels)
         except AttributeError:
             loss = self.criterion(outputs, labels)
+        _, preds = torch.max(outputs.logits, dim=1)
+        correct = (preds == labels).sum().item()    
+        acc = correct / len(labels)
         loss.backward()
         self.optimizer.step()
         logger.info(loss.item())
         mlflow.log_metric("loss", loss.item())
+        mlflow.log_metric("acc", acc)
         mlflow.log_metric("time", time.time())
         del inputs, labels, outputs, loss
         gc.collect()
@@ -47,6 +57,7 @@ class TorchModelTrainMixin:
                 try:
                     self._train_batch(tweets, labels.float())
                 except RuntimeError as e:
+                    raise e
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()
@@ -67,7 +78,6 @@ class TorchModelTrainMixin:
                         f"CUDA allocated memory: {torch.cuda.memory_allocated()}"
                     )
             self.scheduler.step()
-        self.save()
         super().train()
 
 

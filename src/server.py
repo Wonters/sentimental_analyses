@@ -1,9 +1,10 @@
 import fastapi
 import httpx
+import asyncio
 from fastapi.routing import APIRouter
 from fastapi.requests import Request
 from fastapi.responses import Response
-from fastapi import Form
+from fastapi import Form, WebSocket
 from fastapi.templating import Jinja2Templates
 from multiprocessing import Process, Pipe
 from multiprocessing.pool import Pool
@@ -33,8 +34,6 @@ PREDICTION_STATUS = prom.Gauge(
 
 LOKI_URL = "http://loki:3100/loki/api/v1/push"
 MONGO_URI = "mongodb://db:27017/"
-FLAG_START = "started"
-FLAG_DONE = "done"
 
 logging.basicConfig(
     level=logging.INFO, format="%(message)s", datefmt="[%X]", handlers=[RichHandler()]
@@ -46,8 +45,6 @@ templates = Jinja2Templates(directory="templates")
 
 
 pool = None
-tasks = {}
-pipes = {}
 
 
 def get_pool():
@@ -58,25 +55,32 @@ def get_pool():
 
 
 def run_predict(text: List[Tweet], sender):
-    logger.info("prediction started")
+    FLAG_START = "started"
+    FLAG_DONE = "done"
+    logger.info(f"prediction started {text}")
     sender.send(FLAG_START)
     start_time = time.time()
     time.sleep(3)
     # result = BertModel().predict(text)
+    logger.info(f"prediction done {text}")
     sender.send(FLAG_DONE)
     result = [("tweet",random.randint(0, 1)) for _ in range(len(text))]
     return result, time.time() - start_time
 
 
 class PredictApp:
+    ACK_TIMEOUT = 1.0
+    
+
     def __init__(self):
         self.router = APIRouter()
         self.router.add_api_route("/", self.get, methods=["GET"])
         self.router.add_api_route("/predict", self.predict, methods=["POST"])
-        self.router.add_api_route("/get_result/{id_task}", self.get_result, methods=["GET"])
+        self.router.add_api_websocket_route("/ws/{id_task}", self.get_result)
         self.router.add_api_route("/metrics", self.metrics, methods=["GET"])
-        self.router.add_api_route("/ws/{task_id}", self.websocket_endpoint, methods=["GET"])
         self.active_connections = {}
+        self.tasks = {}
+        self.pipes = {}
 
     async def get(self, request: Request):
         """"""
@@ -86,31 +90,66 @@ class PredictApp:
 
     def metrics(self):
         return Response(prom.generate_latest(), media_type=prom.CONTENT_TYPE_LATEST)
-
-    async def get_result(self, request: Request, id_task: str):
+    
+    async def wait_for_ack(self, websocket: WebSocket, id_task: str):
+        try:
+            ack = await asyncio.wait_for(websocket.receive_text(), timeout=self.ACK_TIMEOUT)
+            if ack == "ACK":
+                return 1
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout waiting for ACK on task {id_task}")
+        return 0
+    
+    async def get_result(self, websocket: WebSocket, id_task: str):
         """
         Get the result of the prediction
         """
+        await websocket.accept()
+        self.active_connections[id_task] = websocket
+        logger.info(f"websockets opened {len(self.active_connections)}")
+        messages_sent = 0
+        messages_acknowledged = 0
         try:
-            process = tasks[id_task]
-            pipe_receiver, pipe_sender = pipes[id_task]
-            if process.ready():
-                PREDICTION_STATUS.labels("bert").set(0)
-                result, duration= process.get()
-                PREDICTION_TIME.labels("bert").set(duration)
-                PREDICTION_COUNT.labels("bert").inc()
-                del tasks[id_task]
-                del pipes[id_task]
-                await self.loki_push(result)
-                return {"status": "done", "result": result}
-            else:
-                status = "pending"
-                if pipe_receiver.poll():
-                    status = pipe_receiver.recv()
-                return {"status": status, "message": ""}
+            process = self.tasks[id_task]
+            pipe_receiver, pipe_sender = self.pipes[id_task]
+            while True:
+                if process.ready():
+                    logger.info(f"task {id_task} done")
+                    PREDICTION_STATUS.labels("bert").dec()
+                    result, duration= process.get()
+                    PREDICTION_TIME.labels("bert").set(duration)
+                    PREDICTION_COUNT.labels("bert").inc()
+                    del self.tasks[id_task]
+                    del self.pipes[id_task]
+                    await self.loki_push(result)
+                    await websocket.send_json({"status": "done", "result": result, "duration": duration})
+                    messages_sent += 1
+                    #messages_acknowledged += await self.wait_for_ack(websocket, id_task)
+                    break
+                else:
+                    status = "pending"
+                    if pipe_receiver.poll():
+                        status = pipe_receiver.recv()
+                        await websocket.send_json({"status": status, "message": ""})
+                        messages_sent += 1
+                        #messages_acknowledged += await self.wait_for_ack(websocket, id_task)
+                await asyncio.sleep(0.1)
         except KeyError:
             logger.warning(f"task {id_task} not found")
-            return {"status": "error", "message": "Task not found"}
+            await websocket.json({"status": "error", "message": "Task not found"})
+        finally:
+            # Vérifier que tous les messages ont été reçus
+            while True:
+                messages_acknowledged += await self.wait_for_ack(websocket, id_task)
+                print(f"messages_sent: {messages_sent}, messages_acknowledged: {messages_acknowledged}")
+                if messages_sent == messages_acknowledged:
+                    break
+                await asyncio.sleep(0.1)
+            if messages_sent != messages_acknowledged:
+                logger.warning(f"Not all messages were acknowledged for task {id_task}. Sent: {messages_sent}, Acknowledged: {messages_acknowledged}")
+            logger.info(f"task {id_task} closed")
+            del self.active_connections[id_task]
+            await websocket.close()
 
     async def loki_push(self, results: List[tuple]):
         """
@@ -133,8 +172,6 @@ class PredictApp:
             for tweet, sentiment in results
             ]
         }
-        print(log_payload)
-
         async with httpx.AsyncClient() as client:
             await client.post(LOKI_URL, json=log_payload)
 
@@ -149,15 +186,13 @@ class PredictApp:
             tweets = [{"text": str(tweet)} for tweet in text]
             collection.insert_many(tweets)
             logger.info(f"tweets added to db: {len(tweets)} tweets")
-
-        logger.info(f"predicting {text}")
         p = get_pool()
         pipe = Pipe()
-        result = p.apply_async(run_predict, (text, pipe[0]))
-        PREDICTION_STATUS.labels("bert").set(1)
+        result = p.apply_async(run_predict, (text, pipe[1]))
+        PREDICTION_STATUS.labels("bert").inc()
         task_id = str(uuid.uuid4())
-        tasks[task_id] = result
-        pipes[task_id] = pipe
+        self.tasks[task_id] = result
+        self.pipes[task_id] = pipe
         logger.info(f"task {task_id} started")
         return {"task_id": task_id, "status": "processing"}
 

@@ -10,7 +10,7 @@ services:
       - ./src:/app/src/
     stdin_open: true
     tty: true
-    # entrypoint: "./entrypoint.sh"
+    entrypoint: "/bin/bash" #"./entrypoint.sh"
     environment:
       - MLFLOW_TRACKING_URI=http://0.0.0.0:5001
       - HOST_DEPLOY = 0.0.0.0
@@ -35,8 +35,14 @@ services:
       - loki
     volumes:
       - grafana-storage:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/dashboards
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/tweet_dashboards.yml
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/alerting:/etc/grafana/alerting
+      - ./grafana/alerting.yml:/etc/grafana/provisioning/alerting/tweet_alerts.yml
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/tweet_dashboard.json
     restart: unless-stopped
 
   loki:
