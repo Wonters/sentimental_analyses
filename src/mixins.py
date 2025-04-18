@@ -1,9 +1,13 @@
 import mlflow
 import torch
 from tqdm import tqdm
+import numpy as np
 import gc
 import time
 import logging
+import optuna
+import random
+from torch.utils.data import Subset, DataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,40 @@ class TorchModelTrainMixin:
     checkpoint: str = ""
     lr: float = 2e-5
     device: torch.device
+
+    def get_sampled_dataloader(self, frac=0.1):
+        dataset_size = len(self.dataset)
+        sample_size = int(frac * dataset_size)
+        indices = random.sample(range(dataset_size), sample_size)
+        sampled_dataset = Subset(self.dataset, indices)
+        return DataLoader(sampled_dataset, batch_size=self.batch_size, shuffle=True)
+
+    def optuna_train(self, run_name:str = "", n_trials:int=30, frac=0.1):
+        self.init_mlflow(run_name)
+        self.dataloader = self.get_sampled_dataloader(frac=frac)
+        self.x_val = self.x_val.sample(frac=frac, random_state=42)
+        self.y_val = self.y_val.sample(frac=frac, random_state=42)
+        self.x_train = self.x_train.sample(frac=frac, random_state=42)
+        self.y_train = self.y_train.sample(frac=frac, random_state=42)
+        study = optuna.create_study(direction="maximize",
+                                    pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1))
+        study.optimize(self.objective, n_trials=n_trials)
+        
+
+    def objective(self, trial):
+        lr = trial.suggest_loguniform('lr', 1e-6, 1e-3)
+        gamma = trial.suggest_float('gamma', 0.1, 0.9)
+        step_size = trial.suggest_int('step_size', 2, 10)
+        with mlflow.start_run(nested=True):
+            mlflow.log_params({
+                "lr": lr,
+                "gamma": gamma,
+                "step_size": step_size
+            })
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+            self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=step_size, gamma=gamma)
+            acc = self.train()
+        return acc
 
     def _train_batch(self, x, y):
         inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
@@ -38,7 +76,7 @@ class TorchModelTrainMixin:
         acc = correct / len(labels)
         loss.backward()
         self.optimizer.step()
-        logger.info(loss.item())
+        logger.info(f"loss {loss.item()}")
         mlflow.log_metric("loss", loss.item())
         mlflow.log_metric("acc", acc)
         mlflow.log_metric("time", time.time())
@@ -47,17 +85,22 @@ class TorchModelTrainMixin:
         if torch.backends.mps.is_available():
             torch.mps.empty_cache()
         time.sleep(0.2)
+        return acc
 
     def train(self):
-        self.init_mlflow()
+        try:
+            self.init_mlflow()
+        except Exception:
+            logger.info("mlflow run already started, you had launched train with optuna")
+            pass
         self.model.train()
         self.model.to(self.device)
+        acc = []
         for epoch in tqdm(range(self.epoch)):
             for tweets, labels in tqdm(self.dataloader):
                 try:
-                    self._train_batch(tweets, labels.float())
+                    acc.append(self._train_batch(tweets, labels.float()))
                 except RuntimeError as e:
-                    raise e
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()
@@ -79,6 +122,7 @@ class TorchModelTrainMixin:
                     )
             self.scheduler.step()
         super().train()
+        return sum(acc)/len(acc)
 
 
 class SklearnModelTrainMixin:

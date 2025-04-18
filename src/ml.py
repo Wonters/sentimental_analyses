@@ -11,20 +11,21 @@ from multiprocessing import cpu_count
 import torch
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 from lightgbm import LGBMClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.ensemble import RandomForestClassifier
 import seaborn as sns
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from skopt import BayesSearchCV, gp_minimize
 from skopt.space import Real, Categorical
 from skopt.utils import use_named_args
 import logging
-import torch.nn.functional as F
+from transformers import PreTrainedModel
 import mlflow
 from mlflow.data.pandas_dataset import from_pandas
 from mlflow.models import infer_signature
@@ -44,7 +45,7 @@ else:
     DEVICE = torch.device("cpu")
     logger.info("Using CPU")
 
-DEVICE = torch.device("cpu")
+#DEVICE = torch.device("cpu")
 
 SENTIMENT_LABELS = {
     0: "😡 unsatisfy",
@@ -67,7 +68,7 @@ class BaseModelABC(ABC):
     dataset_class = None
     tokenizer_class = None
     batch_size = 32
-    artifact_uri = "file:///app/mlruns"
+    #artifact_uri = "file:///app/mlruns"
 
     def __init__(self, dataset: pd.DataFrame):
         self.original_dataset = dataset
@@ -146,7 +147,7 @@ class BaseModelABC(ABC):
             plt.ylabel("Cluster réels")
             plt.savefig(f.name)
             plt.close()
-            mlflow.log_artifact(f.name, "confusion_matrix.png")
+            mlflow.log_artifact(f.name)#, "confusion_matrix.png")
 
     def train(self):
         """
@@ -160,12 +161,22 @@ class BaseModelABC(ABC):
         signature = infer_signature(self.x_train, self.predict(self.x_train))
         dataset = from_pandas(self.original_dataset.loc[self.x_train.index], source="local")
         mlflow.log_input(dataset, context="tweet-dataset")
-        model_info = mlflow.sklearn.log_model(
-            sk_model=self.model,
-            artifact_path=self.name,
-            signature=signature,
-            registered_model_name=f"{self.name}-quickstart",
-        )
+        if isinstance(self.model, PreTrainedModel):
+            mlflow.transformers.log_model(
+                transformers_model=self.checkpoint,
+                artifact_path=self.name,
+                task="text-classification",  # important !
+                tokenizer=self.tokenizer,
+                signature=signature,
+                registered_model_name=f"{self.name}-quickstart"
+            )
+        else:
+            mlflow.sklearn.log_model(
+                sk_model=self.model,
+                artifact_path=self.name,
+                signature=signature,
+                registered_model_name=f"{self.name}-quickstart",
+            )
         mlflow.end_run()
 
     def predict(self, x: Union[pd.Series, np.ndarray]):
@@ -341,9 +352,9 @@ class BertModel(TorchBaseModel):
     model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
     dataset_class = TweetDataset
     epoch = 1
-    batch_size = 200
+    batch_size = 100
     out_features = 2
-    lr = 2e-5
+    lr = 2.561e-4
     device = DEVICE
 
     def load_checkpoint(self):
@@ -362,7 +373,7 @@ class BertModel(TorchBaseModel):
             )
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(
-            self.optimizer, step_size=5, gamma=0.1
+            self.optimizer, step_size=8, gamma=0.248
         )
         self.criterion = torch.nn.CrossEntropyLoss()
 
@@ -371,13 +382,23 @@ class BertModel(TorchBaseModel):
         self.tokenizer.save_pretrained(self.checkpoint)
 
     def predict(self, x: list):
-        inputs = self.preprocessing(x)
-        inputs = inputs.to(self.device)
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            probs = F.softmax(outputs.logits, dim=1)
-            predicted_class = torch.argmax(probs, dim=1).tolist()
+        predicted_class = []
+        for i in range(0, len(x), self.batch_size):
+            inputs = self.preprocessing(x[i:i+self.batch_size])
+            inputs = inputs.to(self.device)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                probs = F.softmax(outputs.logits, dim=1)
+                predicted_class.extend(torch.argmax(probs, dim=1).tolist())
         return predicted_class
+
+class RobertaModel(BertModel):
+    """
+    Using a roberta base sentiment to predict tweet sentiments
+    """
+    model_name = "cardiffnlp/twitter-roberta-base-sentiment"
+    tokenizer_name = "cardiffnlp/twitter-roberta-base-sentiment"
+    checkpoint = "checkpoints/roberta"
 
 
 class LSTMModel(TorchBaseModel):

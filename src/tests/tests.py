@@ -6,10 +6,12 @@ from ..ml import (
     LogisticRegressionModel,
     load_data,
     BertModel,
+    RobertaModel,
     LSTMModel,
     RandomForestModel,
     LightGBMModel,
 )
+from transformers import PreTrainedModel
 from ..server import app
 
 
@@ -57,6 +59,19 @@ class TestBertModel(BaseTest):
 
     def test_confusion_matrix(self):
         self.model.confusion_matrix()
+
+    def test_optuna_train(self):
+        self.model.optuna_train(n_trials=5)
+
+class TestRobertaModel(BaseTest):
+    class_model = RobertaModel
+
+    def test_optuna_train(self):
+        self.model.optuna_train(n_trials=5)
+
+    def test_predict(self):
+        result = self.model.predict(list(self.x_test))
+        assert result == [1, 1, 0, 0, 0, 0]
 
 
 class TestLSTMModel(BaseTest):
