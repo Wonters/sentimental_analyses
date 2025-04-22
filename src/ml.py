@@ -426,7 +426,11 @@ class BertModel(TorchBaseModel):
         self.criterion = torch.nn.CrossEntropyLoss()
 
     def save(self):
-        self.model.save_pretrained(self.checkpoint)
+        print(dist.is_available(), dist.is_initialized())
+        if dist.is_available() and dist.is_initialized():
+            self.model.module.save_pretrained(self.checkpoint)
+        else:
+            self.model.save_pretrained(self.checkpoint)
         self.tokenizer.save_pretrained(self.checkpoint)
 
     def predict(self, x: list):

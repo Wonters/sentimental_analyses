@@ -70,7 +70,8 @@ class TorchModelTrainMixin:
         inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
         if isinstance(inputs, dict) and inputs["input_ids"]:
             inputs["input_ids"] = inputs["input_ids"].float()
-        if False and isinstance(y, torch.Tensor) and y.dtype == torch.float32:
+        # todo : fix this case for bert vs lstm
+        if True and isinstance(y, torch.Tensor) and y.dtype == torch.float32:
             labels = y.long()
         else:
             labels = y.float()
@@ -84,6 +85,7 @@ class TorchModelTrainMixin:
             _, preds = torch.max(outputs.logits, dim=1)
         except AttributeError:
             loss = self.criterion(outputs, labels)
+            # todo : error on accuracy return always 0 
             preds = outputs 
         correct = (preds == labels).sum().item()    
         acc = correct / len(labels)
