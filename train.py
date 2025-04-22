@@ -1,11 +1,8 @@
-from src.ml import load_data, RandomForestModel, LogisticRegressionModel, BertModel, RobertaModel, LSTMModel
-import logging
-from rich.logging import RichHandler
+## Import lightgbm avoiding segfault error, protection against segfault
+#import lightgbm as lgb
+from src.ml import LightGBMModel, load_data, LSTMModel
 
-logging.basicConfig(
-    level=logging.INFO, format="%(message)s", datefmt="[%X]", handlers=[RichHandler()]
-)
-file = "../data/training.1600000.processed.noemoticon.csv"
-original_df = load_data(file)
-model = LSTMModel(original_df)
-model.optuna_train(n_trials=5, frac=0.001)
+df  = load_data('../data/training.1600000.processed.noemoticon.csv')
+#df = df.sample(frac=1, random_state=42)
+model = LSTMModel(df)
+model.train()

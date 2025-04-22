@@ -1,6 +1,8 @@
 import numpy as np
 import joblib
 import os 
+import re
+import string
 from functools import partial
 from pathlib import Path
 from abc import ABC
@@ -13,7 +15,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
-from lightgbm import LGBMClassifier
+import lightgbm as lgm
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics import confusion_matrix, classification_report
@@ -112,7 +114,6 @@ class BaseModelABC(ABC):
         self.run = mlflow.start_run(run_name=name if name else self.name)
         self.run_id = self.run.info.run_id
 
-
     def load_checkpoint(self) -> object:
         """
         Logic to load the model from a checkpoint or create a new one
@@ -147,7 +148,7 @@ class BaseModelABC(ABC):
             plt.ylabel("Cluster réels")
             plt.savefig(f.name)
             plt.close()
-            mlflow.log_artifact(f.name)#, "confusion_matrix.png")
+            mlflow.log_artifact(f.name, "confusion_matrix.png")
 
     def train(self):
         """
@@ -170,6 +171,13 @@ class BaseModelABC(ABC):
                 signature=signature,
                 registered_model_name=f"{self.name}-quickstart"
             )
+        elif isinstance(self.model, lgm.LGBMClassifier):
+            mlflow.lightgbm.log_model(
+                lgb_model=self.model,
+                artifact_path=self.name,
+                signature=signature,
+                registered_model_name=f"{self.name}-quickstart",
+            )
         else:
             mlflow.sklearn.log_model(
                 sk_model=self.model,
@@ -189,7 +197,7 @@ class BaseModelABC(ABC):
 class SklearnBaseModel(BaseModelABC):
     def log_metrics(self):
         super().log_metrics()
-        mlflow.sklearn.log_model(self.model, self.name)
+        #mlflow.sklearn.log_model(self.model, self.name)
         mlflow.log_params(self.model.get_params())
 
 class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
@@ -257,15 +265,23 @@ class LightGBMModel(SklearnBaseModel):
     def log_metrics(self):
         """Callback pour logger les métriques dans MLflow"""
         super().log_metrics()
-        mlflow.log_metric("oob_score", self.model.oob_score_)
+
 
     def init_items(self):
-        self.model = LGBMClassifier(
-            n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42
+        self.model = lgm.LGBMClassifier(
+            #n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42
         )
         self.tokenizer = self.tokenizer_class(
-            max_features=1000, ngram_range=(1, 2), binary=True
+            max_features=1000, min_df=2, max_df=0.95
         )
+
+    def clean(self, tweet):
+        translator = str.maketrans('','', string.punctuation)
+        tweet = tweet.translate(translator)
+        tweet = re.sub("^[a-z][A-Z]", " ",tweet)
+        tweet = tweet.lower()
+        tweet = ' '.join(tweet.split())
+        return tweet
 
     def train(self):
         """
@@ -274,10 +290,9 @@ class LightGBMModel(SklearnBaseModel):
         self.init_mlflow()
         try:
             # Vectorisation du texte
-            X_train = self.tokenizer.fit_transform(self.x_train)
+            X_train = self.tokenizer.fit_transform(self.x_train.apply(self.clean))
             self.model.fit(X_train, self.y_train)
             super().train()
-            # self.model.n_estimators += 10
         except Exception as e:
             logger.error(f"Erreur pendant l'entraînement: {str(e)}")
             raise
@@ -513,4 +528,5 @@ def load_data(path):
     df_tweets = pd.read_csv(path, names=headers, encoding="latin-1")
     # On prend target 0 negatif 1 positif
     df_tweets.loc[:, "target"] = df_tweets.target.map({0: int(0), 4: int(1)})
+
     return df_tweets

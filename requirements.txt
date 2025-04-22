@@ -101,4 +101,5 @@ scikit-optimize==0.10.2
 lightgbm==4.1.0
 pymongo==4.12.0
 prometheus-client==0.21.1
+optuna==3.4.0
 

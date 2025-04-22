@@ -1,6 +1,6 @@
+import lightgbm
 import pytest
 import time
-import os
 from fastapi.testclient import TestClient
 from ..ml import (
     LogisticRegressionModel,

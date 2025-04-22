@@ -64,6 +64,7 @@ class TorchModelTrainMixin:
         self.optimizer.zero_grad()
         inputs = inputs.to(self.device)
         labels = labels.to(self.device)
+        # Give input_ids and attention masks
         outputs = self.model(**inputs)
         try:
             loss = self.criterion(outputs.logits, labels)

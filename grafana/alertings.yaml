@@ -1,9 +1,9 @@
-apiVersion: 1
+# apiVersion: 1
 
-groups:
-  - name: alert-rules
-    folder: Tweet Alerts
-    orgId: 1
-    interval: 30s
-    rules:
-      - file: /etc/grafana/alerting/rules.yml
+# groups:
+#   - name: alert-rules
+#     folder: Tweet Alerts
+#     orgId: 1
+#     interval: 30s
+#     rules:
+#       - file: /etc/grafana/alerting/rules.json
