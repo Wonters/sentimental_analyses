@@ -1,6 +1,6 @@
-artifact_location: file:///Users/wonters/Desktop/openclassroom/projets/sentiment_analyses/sentimental_analyses/mlruns/0
-creation_time: 1744984721760
+artifact_location: file:///home/debian/sentimental_analyses/mlruns/0
+creation_time: 1745341000952
 experiment_id: '0'
-last_update_time: 1744984721760
+last_update_time: 1745341000952
 lifecycle_stage: active
 name: Default

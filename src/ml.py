@@ -432,7 +432,7 @@ class LSTMModel(TorchBaseModel):
     name = "LSTM"
     dataset_class = TweetDataset
     epoch = 1
-    batch_size = 120
+    batch_size = 100
     # test with BCEWithLogitLoss -> 1 logit -> post traitment sigmoïd
     out_features = 1
     lr = 1e-4
@@ -473,6 +473,16 @@ class LSTMModel(TorchBaseModel):
             }
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
+        import torch
+        import torch.nn as nn
+        import torch.distributed as dist
+
+        dist.init_process_group("nccl")
+        local_rank = torch.distributed.get_rank()
+        torch.cuda.set_device(local_rank)
+
+        self.model = self.model.cuda(local_rank)
+        self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[local_rank], output_device=local_rank,find_unused_parameters=True)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
