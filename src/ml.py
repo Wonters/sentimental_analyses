@@ -208,14 +208,15 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
     """
 
     def __init__(self, dataset: pd.DataFrame):
-        dist.init_process_group("nccl")
-        if dist.is_initialized():
-            self.local_rank = dist.get_rank()
-            torch.cuda.set_device(self.local_rank)
-        super().__init__(dataset)
-        if dist.is_initialized():
-            self.dataloader, self.sampler = self.get_ddp_dataloader()
-            logger.info(f"Rank {dist.get_rank()} using DDP")
+        if dist.is_available():
+            dist.init_process_group("nccl")
+            if dist.is_initialized():
+                self.local_rank = dist.get_rank()
+                torch.cuda.set_device(self.local_rank)
+            super().__init__(dataset)
+            if dist.is_initialized():
+                self.dataloader, self.sampler = self.get_ddp_dataloader()
+                logger.info(f"Rank {dist.get_rank()} using DDP")
 
     def parralle_model(self):
         self.model = self.model.cuda(f"cuda:{self.local_rank}")
@@ -426,7 +427,6 @@ class BertModel(TorchBaseModel):
         self.criterion = torch.nn.CrossEntropyLoss()
 
     def save(self):
-        print(dist.is_available(), dist.is_initialized())
         if dist.is_available() and dist.is_initialized():
             self.model.module.save_pretrained(self.checkpoint)
         else:
