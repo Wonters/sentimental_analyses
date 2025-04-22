@@ -474,7 +474,7 @@ class LSTMModel(TorchBaseModel):
                     map_location={"cuda:0": "mps", "cuda": "mps"},
                 )
             else:
-                checkpoint = torch.load(self.checkpoint + "/model.pth")
+                checkpoint = torch.load(self.checkpoint + "/model.pth",map_location=f"cuda:{local_rank}")
             embedding_weights = {
                 k: v
                 for k, v in checkpoint.items()
