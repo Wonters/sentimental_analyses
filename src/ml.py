@@ -488,7 +488,7 @@ class LSTMModel(TorchBaseModel):
             self.model.eval()
 
 
-        self.model = self.model.cuda(self.local_rank)
+        self.model = self.model.cuda(f"cuda:{self.local_rank}")
         self.model = nn.parallel.DistributedDataParallel(self.model, 
                                                          device_ids=[self.local_rank], 
                                                          output_device=self.local_rank,
