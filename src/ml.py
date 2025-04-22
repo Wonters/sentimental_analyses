@@ -217,6 +217,13 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
             self.dataloader, self.sampler = self.get_ddp_dataloader()
             logger.info(f"Rank {dist.get_rank()} using DDP")
 
+    def parralle_model(self):
+        self.model = self.model.cuda(f"cuda:{self.local_rank}")
+        self.model = nn.parallel.DistributedDataParallel(self.model, 
+                                                            device_ids=[self.local_rank], 
+                                                            output_device=self.local_rank,
+                                                            find_unused_parameters=True)
+
     def preprocessing(self, data):
         return self.tokenizer(list(data), return_tensors="pt", truncation=True, padding=True)
 
@@ -409,6 +416,9 @@ class BertModel(TorchBaseModel):
                 ignore_mismatched_sizes=True,
                 num_labels=self.out_features,
             )
+        if dist.is_available() and dist.is_initialized():
+            self.model = self.parralle_model()
+            
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(
             self.optimizer, step_size=8, gamma=0.248
@@ -445,7 +455,7 @@ class LSTMModel(TorchBaseModel):
     name = "LSTM"
     dataset_class = TweetDataset
     epoch = 1
-    batch_size = 100
+    batch_size = 32
     # test with BCEWithLogitLoss -> 1 logit -> post traitment sigmoïd
     out_features = 1
     lr = 1e-4
@@ -487,12 +497,9 @@ class LSTMModel(TorchBaseModel):
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
 
-
-        self.model = self.model.cuda(f"cuda:{self.local_rank}")
-        self.model = nn.parallel.DistributedDataParallel(self.model, 
-                                                         device_ids=[self.local_rank], 
-                                                         output_device=self.local_rank,
-                                                         find_unused_parameters=True)
+        if dist.is_available() and dist.is_initialized():
+            self.model = self.parralle_model()
+        
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
@@ -513,6 +520,9 @@ class LSTMModel(TorchBaseModel):
 
     def save(self):
         # Create the parent directory saving tokenizer
+        if dist.is_available() and dist.is_initialized():
+            if dist.get_rank() != 0:
+                return  # ne rien faire sur les autres GPU
         self.tokenizer.save_pretrained(self.checkpoint)
         torch.save(self.model.state_dict(), self.checkpoint + "/model.pth")
 
