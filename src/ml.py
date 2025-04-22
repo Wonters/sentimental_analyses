@@ -11,8 +11,10 @@ from tempfile import NamedTemporaryFile
 import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 import torch
+import torch.nn as nn
+import torch.distributed as dist
 from tqdm import tqdm
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
 import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 import lightgbm as lgm
@@ -473,9 +475,6 @@ class LSTMModel(TorchBaseModel):
             }
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
-        import torch
-        import torch.nn as nn
-        import torch.distributed as dist
 
         dist.init_process_group("nccl")
         local_rank = torch.distributed.get_rank()
@@ -483,6 +482,7 @@ class LSTMModel(TorchBaseModel):
 
         self.model = self.model.cuda(local_rank)
         self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[local_rank], output_device=local_rank,find_unused_parameters=True)
+        self.dataset = DistributedSampler(self.dataset)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2

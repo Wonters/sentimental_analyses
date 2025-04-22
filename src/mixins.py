@@ -8,6 +8,7 @@ import logging
 import optuna
 import random
 from torch.utils.data import Subset, DataLoader
+import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class TorchModelTrainMixin:
         acc = correct / len(labels)
         loss.backward()
         self.optimizer.step()
-        logger.info(f"loss {loss.item()}")
+        logger.info(f" Rank {dist.get_rank()} loss {loss.item()}")
         mlflow.log_metric("loss", loss.item())
         mlflow.log_metric("acc", acc)
         mlflow.log_metric("time", time.time())
