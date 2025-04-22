@@ -22,3 +22,12 @@ Credentials are stored in ~/.config/ovhai/context.json
 ```bash
 uv pip install boto3 awscli ovhai
 ```
+
+## Run on multi GPU
+DEBUG
+```bash
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+```
+```bash
+python -m torch.distributed.run --nproc_per_node=2 train.py
+```

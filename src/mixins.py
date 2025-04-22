@@ -7,8 +7,9 @@ import time
 import logging
 import optuna
 import random
-from torch.utils.data import Subset, DataLoader
+from torch.utils.data import Subset, DataLoader, DistributedSampler
 import torch.distributed as dist
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,15 @@ class TorchModelTrainMixin:
     lr: float = 2e-5
     device: torch.device
 
-    def get_sampled_dataloader(self, frac=0.1):
+    def sample_dataset(self, frac=0.1):
         dataset_size = len(self.dataset)
         sample_size = int(frac * dataset_size)
         indices = random.sample(range(dataset_size), sample_size)
         sampled_dataset = Subset(self.dataset, indices)
+        return sampled_dataset
+
+    def get_sampled_dataloader(self, frac=0.1):
+        sampled_dataset = self.sample_dataset(frac=frac)
         return DataLoader(sampled_dataset, batch_size=self.batch_size, shuffle=True)
 
     def optuna_train(self, run_name:str = "", n_trials:int=30, frac=0.1):
@@ -53,6 +58,13 @@ class TorchModelTrainMixin:
             self.reinit_scheduler_optimizer(**kwargs)
             acc = self.train()
         return acc
+    
+    def get_ddp_dataloader(self, frac=1.0):
+        sampled_dataset = self.sample_dataset(frac=frac)
+        sampler = DistributedSampler(sampled_dataset)
+        dataloader = DataLoader(sampled_dataset, batch_size=self.batch_size, sampler=sampler)
+        return dataloader, sampler
+    
 
     def _train_batch(self, x, y):
         inputs = self.tokenizer(x, return_tensors="pt", truncation=True, padding=True)
@@ -103,7 +115,6 @@ class TorchModelTrainMixin:
                     current_acc = self._train_batch(tweets, labels.float())
                     acc.append(current_acc)
                 except RuntimeError as e:
-                    raise e
                     logger.error(e)
                     del tweets, labels, self.optimizer
                     gc.collect()

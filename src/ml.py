@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 from tqdm import tqdm
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 import lightgbm as lgm
@@ -206,6 +206,13 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
     """
     Base class to train and predict on a dataset and register data on MLFLow
     """
+
+    def __init__(self, dataset: pd.DataFrame):
+        super().__init__(dataset)
+        if dist.is_initialized():
+            self.dataloader, self.sampler = self.get_ddp_dataloader()
+            logger.info(f"Rank {dist.get_rank()} using DDP")
+
     def preprocessing(self, data):
         return self.tokenizer(list(data), return_tensors="pt", truncation=True, padding=True)
 
@@ -440,10 +447,6 @@ class LSTMModel(TorchBaseModel):
     lr = 1e-4
     device = DEVICE
     # torch.nn.CrossEntropyLoss()
-
-    def __init__(self, dataset: pd.DataFrame):
-        super().__init__(dataset)
-        self.dataset = DistributedSampler(self.dataset)
 
     @property
     def get_metrics(self) -> dict:
