@@ -87,7 +87,16 @@ class TorchModelTrainMixin:
             preds = outputs 
         correct = (preds == labels).sum().item()    
         acc = correct / len(labels)
-        loss.backward()
+        try:
+            loss.backward()
+        except Exception as e:
+            if "out of memory" in str(e):
+                    logger.error(f"[Rank {dist.get_rank()}] CUDA OOM detected")
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    return 0.0  # skip the batch
+            else:
+                raise e
         self.optimizer.step()
         logger.info(f" Rank {dist.get_rank()} loss {loss.item()}")
         mlflow.log_metric("loss", loss.item())
