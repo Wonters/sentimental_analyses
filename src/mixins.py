@@ -100,7 +100,7 @@ class TorchModelTrainMixin:
             else:
                 raise e
         self.optimizer.step()
-        logger.info(f" Rank {dist.get_rank()} loss {loss.item()}")
+        logger.info(f" Rank {dist.get_rank()} loss {loss.item()} acc {acc}")
         mlflow.log_metric("loss", loss.item())
         mlflow.log_metric("acc", acc)
         mlflow.log_metric("time", time.time())
@@ -131,6 +131,9 @@ class TorchModelTrainMixin:
                     gc.collect()
                     if torch.backends.mps.is_available():
                         torch.mps.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.ipc_collect()
                     time.sleep(0.2)
                     self.save()
                     self.load_checkpoint()
