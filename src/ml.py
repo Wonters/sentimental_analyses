@@ -417,8 +417,8 @@ class BertModel(TorchBaseModel):
                 num_labels=self.out_features,
             )
         if dist.is_available() and dist.is_initialized():
-            self.model = self.parralle_model()
-            
+            self.parralle_model()
+
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.StepLR(
             self.optimizer, step_size=8, gamma=0.248
@@ -498,7 +498,7 @@ class LSTMModel(TorchBaseModel):
             self.model.eval()
 
         if dist.is_available() and dist.is_initialized():
-            self.model = self.parralle_model()
+            self.parralle_model()
         
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
