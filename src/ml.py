@@ -441,6 +441,10 @@ class LSTMModel(TorchBaseModel):
     device = DEVICE
     # torch.nn.CrossEntropyLoss()
 
+    def __init__(self, dataset: pd.DataFrame):
+        super().__init__(dataset)
+        self.dataset = DistributedSampler(self.dataset)
+
     @property
     def get_metrics(self) -> dict:
         for k, v in self.model.state_dict().items():
@@ -482,7 +486,6 @@ class LSTMModel(TorchBaseModel):
 
         self.model = self.model.cuda(local_rank)
         self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[local_rank], output_device=local_rank,find_unused_parameters=True)
-        self.dataset = DistributedSampler(self.dataset)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
