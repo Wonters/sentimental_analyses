@@ -38,8 +38,7 @@ services:
       - ./grafana/dashboards:/etc/grafana/dashboards
       - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/tweet_dashboards.yaml
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/alerting:/etc/grafana/alerting
-      - ./grafana/alertings.yaml:/etc/grafana/provisioning/alerting/tweet_alerts.yaml
+      - ./grafana/alerting:/etc/grafana/provisioning/alerting
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/tweet_dashboard.json
