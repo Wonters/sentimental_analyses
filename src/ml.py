@@ -208,6 +208,10 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
     """
 
     def __init__(self, dataset: pd.DataFrame):
+        dist.init_process_group("nccl")
+        if dist.is_initialized():
+            self.local_rank = dist.get_rank()
+            torch.cuda.set_device(self.local_rank)
         super().__init__(dataset)
         if dist.is_initialized():
             self.dataloader, self.sampler = self.get_ddp_dataloader()
@@ -474,7 +478,7 @@ class LSTMModel(TorchBaseModel):
                     map_location={"cuda:0": "mps", "cuda": "mps"},
                 )
             else:
-                checkpoint = torch.load(self.checkpoint + "/model.pth",map_location=f"cuda:{local_rank}")
+                checkpoint = torch.load(self.checkpoint + "/model.pth",map_location=f"cuda:{self.local_rank}")
             embedding_weights = {
                 k: v
                 for k, v in checkpoint.items()
@@ -483,12 +487,12 @@ class LSTMModel(TorchBaseModel):
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
 
-        dist.init_process_group("nccl")
-        local_rank = torch.distributed.get_rank()
-        torch.cuda.set_device(local_rank)
 
-        self.model = self.model.cuda(local_rank)
-        self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[local_rank], output_device=local_rank,find_unused_parameters=True)
+        self.model = self.model.cuda(self.local_rank)
+        self.model = nn.parallel.DistributedDataParallel(self.model, 
+                                                         device_ids=[self.local_rank], 
+                                                         output_device=self.local_rank,
+                                                         find_unused_parameters=True)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
