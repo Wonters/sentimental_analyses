@@ -13,7 +13,8 @@ Four wrapper of models:
 MLFlow is used to list all experiments and easily commpare results for several differents configurations and select the bests
 
 Optuna is used to optimise parameters. It run a set of experiments with a variation of parameters and select the best configuration
-maximising the accuraty 
+maximising the accuracy.
+
 
 
 The app is dockerised and can be installed launching the command
@@ -27,7 +28,19 @@ docker compose up -d
 
 ## Access and architecture
 The application contains alerting system and monitoring on grafana on port 3000
-MLFLO
+APP      PORT
+MLFLOW   5001
+API      5000
+GRAFANA  3000
+MONGO
+PROMETHEUS 
+LOKI
+
+A loki message and prometheus services are define 
+Loki message show the new tweets on grafana. New tweets are saved on a Mongo db.
+Prometheus send metrics as the number of prediction running.
+An alert is send by mail when number of predictions in concurrency are up to 5.
+An alert is send when the result of the prediction is too bad, probability < 0.5.
 
 ## Installation in dev  
 # Install uv (Rust package to fastly install package)
@@ -36,7 +49,7 @@ curl -Ls https://astral.sh/uv/install.sh | bash
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-# OVH Train with AI train 
+## OVH Train with AI train 
 
 Create an object storage on OVH managed with ovhai cli
 The secret key is obtain clicking on the user object storage line 'access secret key'

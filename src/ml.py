@@ -23,7 +23,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.ensemble import RandomForestClassifier
 import seaborn as sns
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, get_linear_schedule_with_warmup
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, get_linear_schedule_with_warmup 
 import pandas as pd
 from skopt import BayesSearchCV, gp_minimize
 from skopt.space import Real, Categorical
@@ -420,7 +420,7 @@ class BertModel(TorchBaseModel):
         if dist.is_available() and dist.is_initialized():
             self.parralle_model()
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         total_steps = len(self.dataloader) * self.epoch
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
