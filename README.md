@@ -1,6 +1,35 @@
-# sentimental_analyses
-Tweet sentimental analyses
+# Sentimental analyses with MLFLOW and models Wrappers
 
+Tweet sentimental analyses with different models.
+
+Four wrapper of models:
+ - Logistic Regression
+ - Random Forest
+ - LightGBM
+ - Bert 
+ - Roberta 
+ - LSTM
+
+MLFlow is used to list all experiments and easily commpare results for several differents configurations and select the bests
+
+Optuna is used to optimise parameters. It run a set of experiments with a variation of parameters and select the best configuration
+maximising the accuraty 
+
+
+The app is dockerised and can be installed launching the command
+```bash
+docker compose up 
+```
+or to run in background
+```bash
+docker compose up -d 
+```
+
+## Access and architecture
+The application contains alerting system and monitoring on grafana on port 3000
+MLFLO
+
+## Installation in dev  
 # Install uv (Rust package to fastly install package)
 ```bash
 curl -Ls https://astral.sh/uv/install.sh | bash
