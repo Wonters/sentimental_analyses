@@ -18,7 +18,7 @@ jobs:
       - name: Show Pytest Version
         run: pytest --version
       - name: Run tests
-        run: pytest tests.py
+        run: pytest src/tests
 
   deploy:
     runs-on: ubuntu-latest
