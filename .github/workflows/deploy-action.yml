@@ -34,4 +34,4 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan 51.254.117.6 >> ~/.ssh/known_hosts
-          ssh -i ~/.ssh/id_rsa debian@51.254.117.6 "cd /home/debian/sentimental_analyses && git pull origin main && ./install.sh"
+          ssh -i ~/.ssh/id_rsa debian@51.254.117.6 "cd /home/debian/sentimental_analyses && git pull origin main && docker compose up -d"
