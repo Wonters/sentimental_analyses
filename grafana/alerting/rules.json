@@ -3,35 +3,37 @@
     "groups": [
         {
             "orgId": 1,
-            "name": "job alert",
+            "name": "test",
             "folder": "bert",
             "interval": "1m",
             "rules": [
                 {
-                    "uid": "dej6cljqgxekge",
-                    "title": "Alert max jobs",
+                    "uid": "aejwyv8iivmyoa",
+                    "title": "Alert max jobs (copy)",
                     "condition": "C",
                     "data": [
                         {
                             "refId": "A",
+                            "queryType": "range",
                             "relativeTimeRange": {
                                 "from": 600,
                                 "to": 0
                             },
-                            "datasourceUid": "cej41rlo2r11cd",
+                            "datasourceUid": "ds_loki",
                             "model": {
-                                "disableTextWrap": false,
+                                "datasource": {
+                                    "type": "loki",
+                                    "uid": "ds_loki"
+                                },
+                                "direction": "backward",
                                 "editorMode": "builder",
-                                "expr": "prediction_status{model=\"bert\"}",
-                                "fullMetaSearch": false,
-                                "includeNullMetadata": true,
+                                "expr": "count_over_time(\n  {app=\"tweet-analyzer\"}\n  | json\n  | __error__=\"\"\n  | confidence < 0.6\n  [5m]\n)",
                                 "instant": true,
                                 "intervalMs": 1000,
-                                "legendFormat": "__auto",
+                                "legendFormat": "",
                                 "maxDataPoints": 43200,
-                                "range": false,
-                                "refId": "A",
-                                "useBackend": false
+                                "queryType": "range",
+                                "refId": "A"
                             }
                         },
                         {
@@ -46,7 +48,7 @@
                                     {
                                         "evaluator": {
                                             "params": [
-                                                5
+                                                1
                                             ],
                                             "type": "gt"
                                         },
@@ -69,11 +71,57 @@
                                     "type": "__expr__",
                                     "uid": "__expr__"
                                 },
-                                "expression": "A",
+                                "expression": "B",
                                 "intervalMs": 1000,
                                 "maxDataPoints": 43200,
                                 "refId": "C",
                                 "type": "threshold"
+                            }
+                        },
+                        {
+                            "refId": "B",
+                            "relativeTimeRange": {
+                                "from": 0,
+                                "to": 0
+                            },
+                            "datasourceUid": "__expr__",
+                            "model": {
+                                "conditions": [
+                                    {
+                                        "evaluator": {
+                                            "params": [
+                                                0,
+                                                0
+                                            ],
+                                            "type": "gt"
+                                        },
+                                        "operator": {
+                                            "type": "and"
+                                        },
+                                        "query": {
+                                            "params": []
+                                        },
+                                        "reducer": {
+                                            "params": [],
+                                            "type": "avg"
+                                        },
+                                        "type": "query"
+                                    }
+                                ],
+                                "datasource": {
+                                    "name": "Expression",
+                                    "type": "__expr__",
+                                    "uid": "__expr__"
+                                },
+                                "expression": "A",
+                                "intervalMs": 1000,
+                                "maxDataPoints": 43200,
+                                "reducer": "count",
+                                "refId": "B",
+                                "settings": {
+                                    "mode": ""
+                                },
+                                "type": "reduce"
                             }
                         }
                     ],
@@ -84,6 +132,7 @@
                         "description": "Task is up to 5 jobs",
                         "summary": "Alert Sentiment analysis"
                     },
+                    "labels": {},
                     "isPaused": false,
                     "notification_settings": {
                         "receiver": "admin-email"

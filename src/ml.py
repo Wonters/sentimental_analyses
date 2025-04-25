@@ -75,15 +75,16 @@ class BaseModelABC(ABC):
     #artifact_uri = "file:///app/mlruns"
 
     def __init__(self, dataset: pd.DataFrame):
-        self.original_dataset = dataset
-        self.x_train, self.x_test, self.x_val, self.y_train, self.y_test, self.y_val = split_data(dataset)
-        self.load_checkpoint()
         self.dataset = None
-        self.name = self.__class__.__name__
-        self.dataset = self.dataset_class(self.tokenizer, self.x_train, self.y_train)
-        self.dataloader = DataLoader(
-            self.dataset, batch_size=self.batch_size, shuffle=True
-        )
+        if dataset:
+            self.original_dataset = dataset
+            self.x_train, self.x_test, self.x_val, self.y_train, self.y_test, self.y_val = split_data(dataset)
+            self.name = self.__class__.__name__
+            self.dataset = self.dataset_class(self.tokenizer, self.x_train, self.y_train)
+            self.dataloader = DataLoader(
+                self.dataset, batch_size=self.batch_size, shuffle=True
+            )
+        self.load_checkpoint()
 
     def log_metrics(self):
         """
@@ -206,17 +207,18 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
     """
     Base class to train and predict on a dataset and register data on MLFLow
     """
+    distributed = False
 
     def __init__(self, dataset: pd.DataFrame):
-        if dist.is_available():
+        if self.distributed:
             dist.init_process_group("nccl")
-            if dist.is_initialized():
-                self.local_rank = dist.get_rank()
-                torch.cuda.set_device(self.local_rank)
-            super().__init__(dataset)
-            if dist.is_initialized():
-                self.dataloader, self.sampler = self.get_ddp_dataloader()
-                logger.info(f"Rank {dist.get_rank()} using DDP")
+        if dist.is_initialized():
+            self.local_rank = dist.get_rank()
+            torch.cuda.set_device(self.local_rank)
+        super().__init__(dataset)
+        if dist.is_initialized():
+            self.dataloader, self.sampler = self.get_ddp_dataloader()
+            logger.info(f"Rank {dist.get_rank()} using DDP")
 
     def parralle_model(self):
         self.model = self.model.cuda(f"cuda:{self.local_rank}")
@@ -417,20 +419,21 @@ class BertModel(TorchBaseModel):
                 ignore_mismatched_sizes=True,
                 num_labels=self.out_features,
             )
-        if dist.is_available() and dist.is_initialized():
+        if self.distributed and dist.is_initialized():
             self.parralle_model()
 
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
-        total_steps = len(self.dataloader) * self.epoch
-        self.scheduler = get_linear_schedule_with_warmup(
-            self.optimizer,
-            num_warmup_steps=int(0.1 * total_steps),  # 10% warmup
-            num_training_steps=total_steps
-        )
-        self.criterion = torch.nn.CrossEntropyLoss()
+        if self.dataset:
+            self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
+            total_steps = len(self.dataloader) * self.epoch
+            self.scheduler = get_linear_schedule_with_warmup(
+                self.optimizer,
+                num_warmup_steps=int(0.1 * total_steps),  # 10% warmup
+                num_training_steps=total_steps
+            )
+            self.criterion = torch.nn.CrossEntropyLoss()
 
     def save(self):
-        if dist.is_available() and dist.is_initialized():
+        if self.distributed and dist.is_initialized():
             self.model.module.save_pretrained(self.checkpoint)
         else:
             self.model.save_pretrained(self.checkpoint)
@@ -444,7 +447,11 @@ class BertModel(TorchBaseModel):
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 probs = F.softmax(outputs.logits, dim=1)
-                predicted_class.extend(torch.argmax(probs, dim=1).tolist())
+                confidence, categorie = probs.max(dim=1)
+                predicted_class.extend([{'prediction': categorie.item(), 
+                                         'confidence': confidence.item()} 
+                                         for confidence, categorie in zip(confidence, categorie)
+                                         ])
         return predicted_class
 
 class RobertaModel(BertModel):
@@ -504,14 +511,14 @@ class LSTMModel(TorchBaseModel):
             self.model.load_state_dict(embedding_weights, strict=False)
             self.model.eval()
 
-        if dist.is_available() and dist.is_initialized():
+        if self.distributed and dist.is_initialized():
             self.parralle_model()
-        
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        if self.dataset:
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", factor=0.5, patience=2
-        )
-        self.criterion = torch.nn.BCEWithLogitsLoss()
+            )
+            self.criterion = torch.nn.BCEWithLogitsLoss()
 
     def params_optim(self, trial):
         lr = trial.suggest_loguniform('lr', 1e-6, 1e-3)
@@ -527,7 +534,7 @@ class LSTMModel(TorchBaseModel):
 
     def save(self):
         # Create the parent directory saving tokenizer
-        if dist.is_available() and dist.is_initialized():
+        if self.distributed and dist.is_initialized():
             if dist.get_rank() != 0:
                 return  # ne rien faire sur les autres GPU
         self.tokenizer.save_pretrained(self.checkpoint)

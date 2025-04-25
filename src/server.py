@@ -16,7 +16,8 @@ import pymongo
 import uuid
 import time
 import random
-from .ml import BertModel
+import json
+from .ml import BertModel, RobertaModel
 from .models import Tweet, Sentiment
 
 # Configuration des métriques Prometheus
@@ -60,11 +61,10 @@ def run_predict(text: List[Tweet], sender):
     logger.info(f"prediction started {text}")
     sender.send(FLAG_START)
     start_time = time.time()
-    time.sleep(3)
-    # result = BertModel().predict(text)
+    result = RobertaModel(dataset=None).predict([t.text for t in text])
     logger.info(f"prediction done {text}")
     sender.send(FLAG_DONE)
-    result = [("tweet",random.randint(0, 1)) for _ in range(len(text))]
+    result = [{'prediction': r['prediction'], 'confidence': r['confidence'], 'text': t.text} for r, t in zip(result, text)]
     return result, time.time() - start_time
 
 
@@ -124,7 +124,6 @@ class PredictApp:
                     await self.loki_push(result)
                     await websocket.send_json({"status": "done", "result": result, "duration": duration})
                     messages_sent += 1
-                    #messages_acknowledged += await self.wait_for_ack(websocket, id_task)
                     break
                 else:
                     status = "pending"
@@ -132,7 +131,6 @@ class PredictApp:
                         status = pipe_receiver.recv()
                         await websocket.send_json({"status": status, "message": ""})
                         messages_sent += 1
-                        #messages_acknowledged += await self.wait_for_ack(websocket, id_task)
                 await asyncio.sleep(0.1)
         except KeyError:
             logger.warning(f"task {id_task} not found")
@@ -160,16 +158,17 @@ class PredictApp:
                 {
                     "stream": {
                         "app": "tweet-analyzer",
-                        "prediction": str(sentiment),
+                        "prediction": str(r['prediction']),
+                        "confidence": str(r['confidence']),
                     },
                     "values": [
                         [
                             str(int(time.time() * 1e9)),
-                            f"Tweet: {tweet} | Prediction: {sentiment} | Correct: {True if sentiment == 1 else False}",
+                            json.dumps(r),
                         ]
                     ],
                 }
-            for tweet, sentiment in results
+            for r in results
             ]
         }
         async with httpx.AsyncClient() as client:

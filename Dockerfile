@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY src src/
+COPY templates templates/
 COPY scripts/entrypoint.sh .
 COPY supervisord.conf .
 EXPOSE 5000

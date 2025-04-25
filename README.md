@@ -73,3 +73,17 @@ export TORCH_DISTRIBUTED_DEBUG=DETAIL
 ```bash
 python -m torch.distributed.run --nproc_per_node=2 train.py
 ```
+
+## Tests
+```bash
+pytest src/tests
+```
+
+## Launch a test to verify the prection from the API
+Go on 127.0.0.1:5000, tap your tweet and click on predict button
+
+Par requête http
+```bash
+export $(cat .env | xargs)
+python post.py 
+```

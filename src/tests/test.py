@@ -1,4 +1,4 @@
-import lightgbm
+#import lightgbm
 import pytest
 import time
 from fastapi.testclient import TestClient
@@ -13,7 +13,6 @@ from ..ml import (
 )
 from transformers import PreTrainedModel
 from ..server import app
-
 
 class BaseTest:
     file = "data/tweets_test_train.csv"
@@ -38,8 +37,8 @@ class TestLogisticRegressionModel(BaseTest):
     class_model = LogisticRegressionModel
 
     def test_predict(self):
-        result = self.model.predict(list(self.x_test))
-        print(result, self.y_test.values)
+        result = self.model.predict(list(self.model.x_test))
+        print(result, self.model.y_test.values)
         assert result.tolist() == [0, 1, 0, 0, 0, 0]
 
 
@@ -54,8 +53,8 @@ class TestBertModel(BaseTest):
     class_model = BertModel
 
     def test_predict(self):
-        result = self.model.predict(list(self.x_test))
-        assert result == [1, 1, 0, 0, 0, 0]
+        result = self.model.predict(list(self.model.x_test))
+        assert [r['prediction'] for r in result] == [1, 1, 0, 0, 0, 0]
 
     def test_confusion_matrix(self):
         self.model.confusion_matrix()
@@ -70,8 +69,9 @@ class TestRobertaModel(BaseTest):
         self.model.optuna_train(n_trials=5)
 
     def test_predict(self):
-        result = self.model.predict(list(self.x_test))
-        assert result == [1, 1, 0, 0, 0, 0]
+        result = self.model.predict(list(self.model.x_test))
+        print(result, self.model.y_test.values)
+        assert [r['prediction'] for r in result] == [0, 0, 1, 0, 0, 0]
 
 
 class TestLSTMModel(BaseTest):
@@ -82,7 +82,7 @@ class TestLSTMModel(BaseTest):
 
 
     def test_predict(self):
-        result = self.model.predict(list(self.x_test))
+        result = self.model.predict(list(self.model.x_test))
         assert result.tolist() == [1, 0, 0, 0, 0, 0]
 
 

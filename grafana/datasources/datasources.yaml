@@ -3,7 +3,7 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
-    uid: DS_TWEET_SENTIMENT SERVER METRICS
+    uid: ds_prometheus
     access: proxy
     orgId: 1
     url: http://prometheus:9090
@@ -12,7 +12,7 @@ datasources:
 
   - name: Loki
     type: loki
-    uid: DS_LOKI
+    uid: ds_loki
     access: proxy
     orgId: 1
     url: http://loki:3100

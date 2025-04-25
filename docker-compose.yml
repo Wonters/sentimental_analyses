@@ -8,9 +8,11 @@ services:
     volumes:
       - ./mlruns:/app/mlruns/
       - ./src:/app/src/
-    stdin_open: true
-    tty: true
-    entrypoint: "/bin/bash" #"./entrypoint.sh"
+    # stdin_open: true
+    # tty: true
+    entrypoint: "./entrypoint.sh"
+    env_file:
+      - .env
     environment:
       - MLFLOW_TRACKING_URI=http://0.0.0.0:5001
       - HOST_DEPLOY = 0.0.0.0
@@ -42,6 +44,12 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/tweet_dashboard.json
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=smtp.gmail.com:587
+      - GF_SMTP_USER=shift.python.software@gmail.com
+      - GF_SMTP_PASSWORD=meph potg kjia pfah
+      - GF_SMTP_FROM_ADDRESS=shift.python.software@gmail.com
+      - GF_SMTP_FROM_NAME=Grafana
     restart: unless-stopped
 
   loki:
@@ -69,16 +77,16 @@ services:
     depends_on:
       - loki
     restart: unless-stopped
-  nginx:
-    image: nginx
-    container_name: sentimental_analyses_nginx
-    ports:
-      - "81:80"
-      - '444:443'
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - backend
+  # nginx:
+  #   image: nginx
+  #   container_name: sentimental_analyses_nginx
+  #   ports:
+  #     - "81:80"
+  #     - '444:443'
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf
+  #   depends_on:
+  #     - backend
 
 volumes:
   grafana-storage:

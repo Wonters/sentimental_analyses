@@ -1,0 +1,10 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: admin-email
+    receivers:
+      - uid: admin-email
+        type: email
+        settings:
+          addresses: "shift.python.software@gmail.com"
