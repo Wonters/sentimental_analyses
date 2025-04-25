@@ -33,4 +33,4 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh -i ~/.ssh/id_rsa debian@shift.python.software.fr "cd /home/debian && git pull origin main && ./install.sh"
+          ssh -i ~/.ssh/id_rsa debian@51.254.117.6 "cd /home/debian && git pull origin main && ./install.sh"
