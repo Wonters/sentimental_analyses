@@ -1,20 +1,32 @@
-name: Deploy alerting alerting
+name: Deploy alerting
 run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
-on: [push]
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
 jobs:
   test:
-    runs-on: python
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     steps:
-      - run: pytest --version
-      - run: pip install -r requirements.txt
-      - run: pytest tests.py
-    branch: develop, main
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Show Pytest Version
+        run: pytest --version
+      - name: Run tests
+        run: pytest src/tests
+
   deploy:
-    runs-on: docker
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
+      - uses: actions/checkout@v3
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
       - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
       - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-      - run: ssh root@38.0.101.76 -i ~/.ssh/id_rsa "cd /home/ubuntu/sentimental_analyses && git pull origin main && ./install.sh"
-    branch: main
+      - run: ssh -i ${{ secrets.SSH_PRIVATE_KEY }} debian@shift.python.software.fr "cd /home/debian && git pull origin main && ./install.sh"

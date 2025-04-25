@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Tweet Prediction</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css">
+</head>
+
+<body class="bg-light">
+  <div class="container">
+    <h2 class="text-justify m-2"> Bienvenue Sur TweetSentimentPredict </h2>
+    <button class="btn btn-success m-2" onclick="addElement()"> Ajoute un tweet</button>
+    <ul class="list-group m-2">
+      <li class="list-group-item">
+      </li>
+    </ul>
+    <button id="sendForm" class="btn btn-success m-2" onclick="sendForm(this)" disabled> Prédire</button>
+    <div id="result"></div>
+  </div>
+  <script>
+    addElement = () => {
+      let element = document.createElement("li");
+      element.classList.add("list-group-item");
+      element.innerHTML = `
+      <div class="row">
+        <div class="col-md-6">
+          <input type="text" name="text" class="form-control" placeholder="Tape ton tweet"></div>
+        <div class="col-md-6">
+          <button class="btn btn-danger" onclick="this.closest('li').remove()"> Supprimer</button>
+        </div>
+      </div>
+      `;
+      document.getElementById("sendForm").disabled = false;
+      document.querySelector("ul").appendChild(element);
+    }
+    sendForm = (button) => {
+      let payload = [];
+      for (const _input of document.querySelectorAll("input[name=text]")) {
+        payload.push({ text: _input.value });
+      }
+      console.log(payload)
+
+      fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(res => res.json()).then(res => {
+        button.disabled = true;
+        ws = new WebSocket("ws://127.0.0.1:5000/ws/" + res.task_id)
+        ws.onmessage = (event) => {
+          const element = document.getElementById("result")
+          const payload = JSON.parse(event.data)
+          ws.send("ACK")
+          if (payload.status == "done") {
+            console.log(payload)
+            element.innerHTML = `
+            <div class="row">
+              <div class="col-md-6">
+                <p> duration: ${payload.duration} </p>
+                <p> ${payload.result.map(r => `<p> ${r.prediction} ${r.confidence} </p>`).join("")} </p>
+              </div>
+            </div>
+            `
+          }
+          else {
+            console.log(payload)
+            const span = document.createElement("span")
+            element.innerHTML = `
+    <span class="spinner-border spinner-border-sm text-primary" role="status">
+      <span class="sr-only">Loading...</span>
+    </span>
+    Prédiction en cours... ${payload.status}
+  `
+          }
+        }
+      })
+    }
+
+
+  </script>
+</body>
+
+</html>

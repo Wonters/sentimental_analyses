@@ -1,7 +1,14 @@
-FROM python-slim
-RUN apt-get update && apt-get install -y procps
-LABEL authors="wonters"
+FROM python:3.10-slim
+RUN apt-get update && apt-get install -y procps git
+LABEL authors="shift"
 WORKDIR /app
-COPY . .
+COPY requirements.txt .
 RUN pip install -r requirements.txt
-ENTRYPOINT ["gunicorn", "--bind", "0.0.0.0:5000", "app:server"]
+COPY src src/
+COPY templates templates/
+COPY scripts/entrypoint.sh .
+COPY supervisord.conf .
+EXPOSE 5000
+EXPOSE 5001
+
+ENTRYPOINT ["./entrypoint.sh"]
