@@ -15,7 +15,7 @@ services:
       - .env
     environment:
       - MLFLOW_TRACKING_URI=http://0.0.0.0:5001
-      - HOST_DEPLOY = 0.0.0.0
+      - HOST_DEPLOY=0.0.0.0
 
   prometheus:
     image: prom/prometheus:latest
