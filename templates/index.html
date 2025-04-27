@@ -47,7 +47,7 @@
         body: JSON.stringify(payload)
       }).then(res => res.json()).then(res => {
         button.disabled = true;
-        ws = new WebSocket("ws://127.0.0.1:5000/ws/" + res.task_id)
+        ws = new WebSocket(`ws://${window.location.host}/ws/` + res.task_id)
         ws.onmessage = (event) => {
           const element = document.getElementById("result")
           const payload = JSON.parse(event.data)
