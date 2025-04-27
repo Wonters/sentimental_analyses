@@ -22,6 +22,7 @@ class TorchModelTrainMixin:
     checkpoint: str = ""
     lr: float = 2e-5
     device: torch.device
+    format_labels_as_long: bool = True
 
     def sample_dataset(self, frac=0.1):
         dataset_size = len(self.dataset)
@@ -53,10 +54,11 @@ class TorchModelTrainMixin:
 
     def objective(self, trial):
         kwargs = self.params_optim(trial)
-        with mlflow.start_run(nested=True):
-            mlflow.log_params(kwargs)
-            self.reinit_scheduler_optimizer(**kwargs)
-            acc = self.train()
+        if self.tracking:
+            with mlflow.start_run(nested=True):
+                mlflow.log_params(kwargs)
+                self.reinit_scheduler_optimizer(**kwargs)
+        acc = self.train()
         return acc
     
     def get_ddp_dataloader(self, frac=1.0):
@@ -71,7 +73,7 @@ class TorchModelTrainMixin:
         if isinstance(inputs, dict) and inputs["input_ids"]:
             inputs["input_ids"] = inputs["input_ids"].float()
         # todo : fix this case for bert vs lstm
-        if True and isinstance(y, torch.Tensor) and y.dtype == torch.float32:
+        if self.format_labels_as_long and isinstance(y, torch.Tensor) and y.dtype == torch.float32:
             labels = y.long()
         else:
             labels = y.float()
@@ -100,10 +102,12 @@ class TorchModelTrainMixin:
             else:
                 raise e
         self.optimizer.step()
-        logger.info(f" Rank {dist.get_rank()} loss {loss.item()} acc {acc}")
-        mlflow.log_metric("loss", loss.item())
-        mlflow.log_metric("acc", acc)
-        mlflow.log_metric("time", time.time())
+        if dist.is_initialized():
+            logger.info(f" Rank {dist.get_rank()} loss {loss.item()} acc {acc}")
+        if self.tracking:
+            mlflow.log_metric("loss", loss.item())
+            mlflow.log_metric("acc", acc)
+            mlflow.log_metric("time", time.time())
         del inputs, labels, outputs, loss
         gc.collect()
         if torch.backends.mps.is_available():

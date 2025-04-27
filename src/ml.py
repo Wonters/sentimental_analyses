@@ -33,6 +33,8 @@ from transformers import PreTrainedModel
 import mlflow
 from mlflow.data.pandas_dataset import from_pandas
 from mlflow.models import infer_signature
+from transformers.models.tapas.modeling_tapas import flatten
+
 from .mixins import TorchModelTrainMixin
 from .torch_models import LSTMTorchNN
 from .dataset import TweetDataset
@@ -72,11 +74,11 @@ class BaseModelABC(ABC):
     dataset_class = None
     tokenizer_class = None
     batch_size = 32
-    #artifact_uri = "file:///app/mlruns"
 
-    def __init__(self, dataset: pd.DataFrame):
+    def __init__(self, dataset: pd.DataFrame, tracking: bool = True):
+        self.tracking = tracking
         self.dataset = None
-        if dataset:
+        if dataset is not None:
             self.original_dataset = dataset
             self.x_train, self.x_test, self.x_val, self.y_train, self.y_test, self.y_val = split_data(dataset)
             self.name = self.__class__.__name__
@@ -112,10 +114,12 @@ class BaseModelABC(ABC):
         """
         self.model = None
         self.tokenizer = None
+        self.tokenizer.fit_transform(self.x_train)
 
     def init_mlflow(self, name:str = ""):
-        self.run = mlflow.start_run(run_name=name if name else self.name)
-        self.run_id = self.run.info.run_id
+        if self.tracking:
+            self.run = mlflow.start_run(run_name=name if name else self.name)
+            self.run_id = self.run.info.run_id
 
     def load_checkpoint(self) -> object:
         """
@@ -135,11 +139,13 @@ class BaseModelABC(ABC):
 
     def confusion_matrix(self):
         with NamedTemporaryFile(suffix=".png") as f:
-            conf_mat = confusion_matrix(self.y_train, self.predict(list(self.x_train)))
+            y_pred = self.predict(list(self.x_train), flatten=True)
+            conf_mat = confusion_matrix(self.y_train, y_pred)
             group_names = ["True Neg", "False Pos", "False Neg", "True Pos"]
             group_counts = [f"{value: 0.0f}" for value in conf_mat.flatten()]
             group_percentages = [f"{value:.2%}" for value in conf_mat.flatten() / np.sum(conf_mat)]
             labels = [f"{v1}\n{v2}\n{v3}" for v1, v2, v3 in zip(group_names, group_counts, group_percentages)]
+            print(labels)
             labels = np.asarray(labels).reshape(2, 2)
             sns.heatmap(
                 conf_mat,
@@ -151,46 +157,49 @@ class BaseModelABC(ABC):
             plt.ylabel("Cluster réels")
             plt.savefig(f.name)
             plt.close()
-            mlflow.log_artifact(f.name, "confusion_matrix.png")
+            if self.tracking:
+                mlflow.log_artifact(f.name, "confusion_matrix.png")
 
     def train(self):
         """
         Train the model here
         """
         self.save()
-        mlflow.set_tag("model_type", self.name)
-        self.log_metrics()
+        if self.tracking:
+            mlflow.set_tag("model_type", self.name)
+            self.log_metrics()
         self.confusion_matrix()
-        mlflow.log_artifact(self.checkpoint)
-        signature = infer_signature(self.x_train, self.predict(self.x_train))
-        dataset = from_pandas(self.original_dataset.loc[self.x_train.index], source="local")
-        mlflow.log_input(dataset, context="tweet-dataset")
-        if isinstance(self.model, PreTrainedModel):
-            mlflow.transformers.log_model(
-                transformers_model=self.checkpoint,
-                artifact_path=self.name,
-                task="text-classification",  # important !
-                tokenizer=self.tokenizer,
-                signature=signature,
-                registered_model_name=f"{self.name}-quickstart"
-            )
-        elif isinstance(self.model, lgm.LGBMClassifier):
-            mlflow.lightgbm.log_model(
-                lgb_model=self.model,
-                artifact_path=self.name,
-                signature=signature,
-                registered_model_name=f"{self.name}-quickstart",
-            )
-        else:
-            mlflow.sklearn.log_model(
-                sk_model=self.model,
-                artifact_path=self.name,
-                signature=signature,
-                registered_model_name=f"{self.name}-quickstart",
-            )
-        mlflow.end_run()
+        if self.tracking:
+            mlflow.log_artifact(self.checkpoint)
+            signature = infer_signature(self.x_train, self.predict(self.x_train))
+            dataset = from_pandas(self.original_dataset.loc[self.x_train.index], source="local")
+            mlflow.log_input(dataset, context="tweet-dataset")
+            if isinstance(self.model, PreTrainedModel):
+                mlflow.transformers.log_model(
+                    transformers_model=self.checkpoint,
+                    artifact_path=self.name,
+                    task="text-classification",  # important !
+                    tokenizer=self.tokenizer,
+                    signature=signature,
+                    registered_model_name=f"{self.name}-quickstart"
+                )
+            elif isinstance(self.model, lgm.LGBMClassifier):
+                mlflow.lightgbm.log_model(
+                    lgb_model=self.model,
+                    artifact_path=self.name,
+                    signature=signature,
+                    registered_model_name=f"{self.name}-quickstart",
+                )
+            else:
+                mlflow.sklearn.log_model(
+                    sk_model=self.model,
+                    artifact_path=self.name,
+                    signature=signature,
+                    registered_model_name=f"{self.name}-quickstart",
+                )
+            mlflow.end_run()
 
-    def predict(self, x: Union[pd.Series, np.ndarray]):
+    def predict(self, x: Union[pd.Series, np.ndarray], flatten: bool = True):
         """
         Predict the sentiment of the input data
         """
@@ -200,7 +209,6 @@ class BaseModelABC(ABC):
 class SklearnBaseModel(BaseModelABC):
     def log_metrics(self):
         super().log_metrics()
-        #mlflow.sklearn.log_model(self.model, self.name)
         mlflow.log_params(self.model.get_params())
 
 class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
@@ -209,13 +217,13 @@ class TorchBaseModel(TorchModelTrainMixin, BaseModelABC):
     """
     distributed = False
 
-    def __init__(self, dataset: pd.DataFrame):
+    def __init__(self, dataset: pd.DataFrame, tracking: bool = True):
         if self.distributed:
             dist.init_process_group("nccl")
         if dist.is_initialized():
             self.local_rank = dist.get_rank()
             torch.cuda.set_device(self.local_rank)
-        super().__init__(dataset)
+        super().__init__(dataset, tracking)
         if dist.is_initialized():
             self.dataloader, self.sampler = self.get_ddp_dataloader()
             logger.info(f"Rank {dist.get_rank()} using DDP")
@@ -257,6 +265,8 @@ class RandomForestModel(SklearnBaseModel):
         self.tokenizer = self.tokenizer_class(
             max_features=1000, ngram_range=(1, 2), binary=True
         )
+        self.tokenizer.fit_transform(self.x_train)
+
 
     def train(self):
         """
@@ -297,6 +307,7 @@ class LightGBMModel(SklearnBaseModel):
         self.tokenizer = self.tokenizer_class(
             max_features=1000, min_df=2, max_df=0.95
         )
+        self.tokenizer.fit_transform(self.x_train)
 
     def clean(self, tweet):
         translator = str.maketrans('','', string.punctuation)
@@ -348,10 +359,11 @@ class LogisticRegressionModel(SklearnBaseModel):
         """
         self.model = LogisticRegression(max_iter=1000,
                                         C=1.7279373898388395,
-                                        penalty='l1',
+                                        penalty='l2',
                                         n_jobs=4, 
                                         verbose=True)
         self.tokenizer = self.tokenizer_class()
+        self.tokenizer.fit_transform(self.x_train)
 
     def objective(self, tokens, params):
         with mlflow.start_run(nested=True):
@@ -431,6 +443,7 @@ class BertModel(TorchBaseModel):
                 num_training_steps=total_steps
             )
             self.criterion = torch.nn.CrossEntropyLoss()
+        self.model.to(self.device)
 
     def save(self):
         if self.distributed and dist.is_initialized():
@@ -439,7 +452,7 @@ class BertModel(TorchBaseModel):
             self.model.save_pretrained(self.checkpoint)
         self.tokenizer.save_pretrained(self.checkpoint)
 
-    def predict(self, x: list):
+    def predict(self, x: list, flatten: bool = False):
         predicted_class = []
         for i in range(0, len(x), self.batch_size):
             inputs = self.preprocessing(x[i:i+self.batch_size])
@@ -448,10 +461,13 @@ class BertModel(TorchBaseModel):
                 outputs = self.model(**inputs)
                 probs = F.softmax(outputs.logits, dim=1)
                 confidence, categorie = probs.max(dim=1)
-                predicted_class.extend([{'prediction': categorie.item(), 
-                                         'confidence': confidence.item()} 
-                                         for confidence, categorie in zip(confidence, categorie)
-                                         ])
+                if not flatten:
+                    predicted_class.extend([{'prediction': categorie.item(),
+                                             'confidence': confidence.item()}
+                                             for confidence, categorie in zip(confidence, categorie)
+                                             ])
+                else:
+                    predicted_class.extend([c.item() for c in categorie])
         return predicted_class
 
 class RobertaModel(BertModel):
@@ -474,7 +490,7 @@ class LSTMModel(TorchBaseModel):
     out_features = 1
     lr = 1e-4
     device = DEVICE
-    # torch.nn.CrossEntropyLoss()
+    format_labels_as_long: bool = False
 
     @property
     def get_metrics(self) -> dict:
@@ -540,7 +556,7 @@ class LSTMModel(TorchBaseModel):
         self.tokenizer.save_pretrained(self.checkpoint)
         torch.save(self.model.state_dict(), self.checkpoint + "/model.pth")
 
-    def predict(self, x):
+    def predict(self, x, flatten: bool = True):
         predicted_class = []
         for i in range(0, len(x), self.batch_size):
             inputs = self.preprocessing(x[i:i+self.batch_size])

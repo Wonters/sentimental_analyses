@@ -4,9 +4,9 @@ import asyncio
 from fastapi.routing import APIRouter
 from fastapi.requests import Request
 from fastapi.responses import Response
-from fastapi import Form, WebSocket
+from fastapi import WebSocket
 from fastapi.templating import Jinja2Templates
-from multiprocessing import Process, Pipe
+from multiprocessing import Pipe
 from multiprocessing.pool import Pool
 from typing import List
 from rich.logging import RichHandler
@@ -15,10 +15,9 @@ import logging
 import pymongo
 import uuid
 import time
-import random
 import json
-from .ml import BertModel, RobertaModel
-from .models import Tweet, Sentiment
+from .ml import RobertaModel
+from .models import Tweet
 
 # Configuration des métriques Prometheus
 PREDICTION_COUNT = prom.Counter(
@@ -55,13 +54,21 @@ def get_pool():
     return pool
 
 
-def run_predict(text: List[Tweet], sender):
+def run_predict(text: List[Tweet], sender, save_db=False):
     FLAG_START = "started"
     FLAG_DONE = "done"
     logger.info(f"prediction started {text}")
     sender.send(FLAG_START)
     start_time = time.time()
     result = RobertaModel(dataset=None).predict([t.text for t in text])
+    if save_db:
+        with pymongo.MongoClient(MONGO_URI) as client:
+            db = client["sentiment_analyses"]
+            collection = db["tweets"]
+            # Convertir la liste de tweets en liste de documents
+            tweets = [{"text": str(t), "prediction": r['prediction'], "confidence": r['confidence']} for r, t in zip(result, text)]
+            collection.insert_many(tweets)
+            logger.info(f"tweets added to db: {len(tweets)} tweets")
     logger.info(f"prediction done {text}")
     sender.send(FLAG_DONE)
     result = [{'prediction': r['prediction'], 'confidence': r['confidence'], 'text': t.text} for r, t in zip(result, text)]
@@ -70,9 +77,8 @@ def run_predict(text: List[Tweet], sender):
 
 class PredictApp:
     ACK_TIMEOUT = 1.0
-    
 
-    def __init__(self):
+    def __init__(self, save_db=False):
         self.router = APIRouter()
         self.router.add_api_route("/", self.get, methods=["GET"])
         self.router.add_api_route("/predict", self.predict, methods=["POST"])
@@ -81,6 +87,7 @@ class PredictApp:
         self.active_connections = {}
         self.tasks = {}
         self.pipes = {}
+        self.save_db = save_db
 
     async def get(self, request: Request):
         """"""
@@ -178,16 +185,9 @@ class PredictApp:
         """
         Predict
         """
-        with pymongo.MongoClient(MONGO_URI) as client:
-            db = client["sentiment_analyses"]
-            collection = db["tweets"]
-            # Convertir la liste de tweets en liste de documents
-            tweets = [{"text": str(tweet)} for tweet in text]
-            collection.insert_many(tweets)
-            logger.info(f"tweets added to db: {len(tweets)} tweets")
         p = get_pool()
         pipe = Pipe()
-        result = p.apply_async(run_predict, (text, pipe[1]))
+        result = p.apply_async(run_predict, (text, pipe[1], self.save_db))
         PREDICTION_STATUS.labels("bert").inc()
         task_id = str(uuid.uuid4())
         self.tasks[task_id] = result
@@ -196,6 +196,6 @@ class PredictApp:
         return {"task_id": task_id, "status": "processing"}
 
 
-predict_app = PredictApp()
+predict_app = PredictApp(save_db=True)
 app.include_router(predict_app.router)
 

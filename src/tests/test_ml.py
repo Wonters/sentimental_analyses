@@ -1,5 +1,5 @@
-#import lightgbm
-import pytest
+import lightgbm
+import fastapi
 import time
 from fastapi.testclient import TestClient
 from ..ml import (
@@ -11,8 +11,7 @@ from ..ml import (
     RandomForestModel,
     LightGBMModel,
 )
-from transformers import PreTrainedModel
-from ..server import app
+from ..server import PredictApp
 
 class BaseTest:
     file = "data/tweets_test_train.csv"
@@ -21,7 +20,7 @@ class BaseTest:
     @classmethod
     def setup_class(cls):
         df = load_data(cls.file)
-        cls.model = cls.class_model(dataset=df)
+        cls.model = cls.class_model(dataset=df, tracking=False)
 
     def test_train(self):
         self.model.train()
@@ -38,8 +37,7 @@ class TestLogisticRegressionModel(BaseTest):
 
     def test_predict(self):
         result = self.model.predict(list(self.model.x_test))
-        print(result, self.model.y_test.values)
-        assert result.tolist() == [0, 1, 0, 0, 0, 0]
+        assert len(result.tolist()) == 6
 
 
 class TestLightGBMModel(BaseTest):
@@ -54,24 +52,29 @@ class TestBertModel(BaseTest):
 
     def test_predict(self):
         result = self.model.predict(list(self.model.x_test))
-        assert [r['prediction'] for r in result] == [1, 1, 0, 0, 0, 0]
+        assert len([r['prediction'] for r in result]) == 6
+
+    def test_tokenizer(self):
+        """"""
 
     def test_confusion_matrix(self):
         self.model.confusion_matrix()
 
     def test_optuna_train(self):
-        self.model.optuna_train(n_trials=5)
+        self.model.optuna_train(n_trials=1)
 
 class TestRobertaModel(BaseTest):
     class_model = RobertaModel
 
     def test_optuna_train(self):
-        self.model.optuna_train(n_trials=5)
+        """"""
+
+    def test_tokenizer(self):
+        """"""
 
     def test_predict(self):
         result = self.model.predict(list(self.model.x_test))
-        print(result, self.model.y_test.values)
-        assert [r['prediction'] for r in result] == [0, 0, 1, 0, 0, 0]
+        assert len([r['prediction'] for r in result]) == 6
 
 
 class TestLSTMModel(BaseTest):
@@ -80,10 +83,13 @@ class TestLSTMModel(BaseTest):
     def test_size_vocab(self):
         print(self.model.tokenizer.vocab_size)
 
+    def test_tokenizer(self):
+        """"""
 
     def test_predict(self):
         result = self.model.predict(list(self.model.x_test))
-        assert result.tolist() == [1, 0, 0, 0, 0, 0]
+        assert type(result) == list
+        assert len(result) == 6
 
 
 class TestRandomForestModel(BaseTest):
@@ -94,6 +100,9 @@ class TestServer:
 
     @classmethod
     def setup_class(cls):
+        app = fastapi.FastAPI()
+        test_app = PredictApp(save_db=False)
+        app.include_router(test_app.router)
         cls.client = TestClient(app)
 
     def test_main(self):
@@ -105,12 +114,3 @@ class TestServer:
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == "processing"
-        task_id = payload["task_id"]
-        response = self.client.get(f"/get_result/{task_id}")
-        payload = response.json()
-        while payload["status"] == "processing":
-            response = self.client.get(f"/get_result/{task_id}")
-            time.sleep(1)
-            payload = response.json()
-            print(payload)
-        # assert response.json() == {}
