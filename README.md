@@ -111,7 +111,7 @@ Go on 127.0.0.1:5000, tap your tweet and click on predict button
 
 
 ## Production
-An exemple deployment is available on https://tweetsentiment.shift.python.software.fr
+An exemple deployment is available on https://tweetsentiment.shift-python-software.fr:5000
 
 ## Monitoring
 Add alert and monitoring and dashboard on grafana on your local instance
